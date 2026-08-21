@@ -1,0 +1,179 @@
+@import "tailwindcss";
+
+/* =====================================================================
+   GSG Clubs Networking Bingo — design tokens
+
+   A single committed dark theme. The signature moment is a constellation
+   filling up as people arrive, and stars need a night sky; the lobby also
+   gets projected in a dim room while phones sit in 300 hands for two
+   hours, so dark is the concept and the glare-and-battery answer at once.
+
+   Colour is rationed on purpose. Amber is the only decorative accent, and
+   it reads as *light* rather than UI chrome, so "a point of light" is
+   literal in the lobby and "this square lit up" is literal on the card.
+   Olive and watermelon appear nowhere except a confirmed square and a
+   completed line. That is what makes colour mean *something just
+   happened* instead of meaning nothing.
+   ===================================================================== */
+
+@theme {
+  --color-canvas:        #0e1116;
+  --color-surface:       #161b24;
+  --color-surface-2:     #1e242f;
+  --color-surface-3:     #29313e;
+
+  --color-ink:           #f3efe8;  /* warm off-white, not pure #fff      */
+  --color-ink-muted:     #a9a49b;  /* 6.9:1 on canvas                    */
+  --color-ink-faint:     #6f6b64;  /* decorative only, never body text   */
+
+  --color-line:          #262d38;
+  --color-line-strong:   #38414f;
+
+  --color-accent:        #f2a93b;  /* amber — light, actions, activity   */
+  --color-accent-dim:    #7a5518;
+  --color-accent-ink:    #1a1206;  /* text ON amber                      */
+
+  --color-confirmed:     #8aa85f;  /* olive — a confirmed square, only   */
+  --color-confirmed-dim: #2b3520;
+
+  --color-bingo:         #e8503a;  /* watermelon — a completed line, only */
+  --color-bingo-text:    #ff8a70;  /* lighter tint that passes AA on dark */
+  --color-bingo-dim:     #3a1a14;
+
+  --color-request:       #7fb2d9;  /* board: someone needs a person      */
+  --color-offer:         #c9a3e0;  /* board: someone is available        */
+
+  --font-display: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-sans:    var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    var(--font-plex-mono), ui-monospace, monospace;
+
+  --radius-tile: 0.5rem;
+}
+
+@layer base {
+  * { min-width: 0; }
+
+  html {
+    background: var(--color-canvas);
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    /* the app is a fixed-height shell; only panes scroll */
+    overscroll-behavior-y: none;
+  }
+
+  h1, h2, h3, .font-display { font-family: var(--font-display); }
+
+  /* Visible focus everywhere, and never removed. A keyboard or switch
+     user has to be able to see where they are. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection { background: var(--color-accent); color: var(--color-accent-ink); }
+
+  input, textarea, select, button { font: inherit; color: inherit; }
+
+  /* iOS zooms the page when a focused input is under 16px. */
+  input, textarea, select { font-size: max(16px, 1em); }
+}
+
+@layer utilities {
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .safe-top    { padding-top:    env(safe-area-inset-top, 0px); }
+
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+}
+
+/* ---------------------------------------------------------------------
+   Motion. Two moments earn animation — the lobby filling up and a line
+   completing. Everything else stays still.
+   --------------------------------------------------------------------- */
+@keyframes star-in {
+  from { opacity: 0; transform: scale(0.2); }
+  60%  { opacity: 1; transform: scale(1.35); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
+@keyframes line-sweep {
+  from { background-position: -120% 0; }
+  to   { background-position: 220% 0; }
+}
+
+@keyframes square-land {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes pulse-ring {
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-accent) 55%, transparent); }
+  70%  { box-shadow: 0 0 0 12px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.animate-star-in    { animation: star-in 520ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+.animate-twinkle    { animation: twinkle 4s ease-in-out infinite; }
+.animate-square-land{ animation: square-land 420ms cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+.animate-rise-in    { animation: rise-in 220ms ease-out both; }
+.animate-pulse-ring { animation: pulse-ring 1.8s ease-out infinite; }
+
+.line-sweep {
+  background-image: linear-gradient(
+    100deg,
+    transparent 20%,
+    color-mix(in oklab, var(--color-bingo) 45%, transparent) 45%,
+    transparent 70%
+  );
+  background-size: 220% 100%;
+  animation: line-sweep 900ms ease-out;
+}
+
+/* ---------------------------------------------------------------------
+   Reduced motion is a real setting, not a nicety. The lobby swaps its
+   drifting constellation for a static grouped roster, and everything
+   else simply appears.
+   --------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   Print: the QR poster. Everything else is screen-only.
+   --------------------------------------------------------------------- */
+@media print {
+  @page { size: A4 portrait; margin: 12mm; }
+  html, body { background: #fff !important; color: #000 !important; }
+  .print-hide { display: none !important; }
+  .print-sheet {
+    display: block !important;
+    width: 100%;
+    color: #000 !important;
+    background: #fff !important;
+  }
+}
