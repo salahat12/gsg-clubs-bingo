@@ -1,5 +1,7 @@
 # GSG Clubs Networking Bingo
 
+**Live:** [gsg-clubs-bingo.vercel.app](https://gsg-clubs-bingo.vercel.app) · admin at `/admin`
+
 A mobile-first networking game for a student club event. Attendees join on
 their phones, wait in a lobby, and start together when the organiser presses
 Start. Each of 25 squares is a person to find, not a fact to tick — a square
