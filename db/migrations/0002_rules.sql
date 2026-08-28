@@ -9,9 +9,9 @@
 -- Error codes (SQLSTATE) map to user-facing copy in src/lib/errors.ts:
 --   GB100 not started   GB101 paused        GB102 ended      GB103 countdown
 --   GB104 join closed   GB200 rate limited  GB300 self-match
---   GB301 pair cap      GB302 same university (criterion 1)
---   GB303 same club     (criterion 22)      GB304 square filled
---   GB305 not yours     GB306 already answered
+--   GB301 pair cap      GB302 same university (criterion 4)
+--   GB304 square filled
+--   GB305 not yours     GB306 already answered  GB307 ambiguous code
 --   GB400 player gone   GB401 not found     GB402 bad card state
 --   GB403 bad request
 -- The RAISE message is the copy shown to the player, so it is written in
@@ -87,12 +87,30 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
+-- A player's display university: the label off the lookup table, or
+-- their own free text when they picked 'other'. Used for messages and
+-- for every read model that shows "university" — never stored on
+-- `players` itself, so relabeling `universities` updates every live
+-- display at once. (The one deliberate exception is card_squares'
+-- filled_by_university, which freezes a snapshot at fill time.)
+-- ---------------------------------------------------------------------
+create or replace function university_label(p_player_id uuid)
+returns text language sql stable as $$
+  select case when p.university_value = 'other' then p.university_other_text else u.label end
+  from players p left join universities u on u.value = p.university_value
+  where p.id = p_player_id
+$$;
+
+-- ---------------------------------------------------------------------
 -- Machine-checkable criteria. p_subject is the player whose square would
--- be filled; p_other is the person vouching.
+-- be filled; p_other is the person who was scanned.
 --
--- diff_club_entity treats a club as (university, club). Two people match
--- unless they are in the exact same club at the exact same university,
--- so IEEE@IUG + IEEE@AUG passes, and GDSC@IUG + IEEE@IUG passes.
+-- diff_university compares university_group, not university_value — this
+-- is the one column relabeling can never change the meaning of.
+--
+-- Criterion 7 ("was in the previous scholarship") is NOT checked here —
+-- every attendee is the same 2025-2026 cohort, so there's no player fact
+-- to verify. It stays 'honor', taken on faith like the other 23.
 -- ---------------------------------------------------------------------
 create or replace function assert_criterion_rule(
   p_criterion_id uuid, p_subject uuid, p_other uuid
@@ -112,17 +130,19 @@ begin
   select * into b from players where id = p_other;
 
   if c.rule = 'diff_university' then
-    if a.university_key = b.university_key then
+    if a.university_group = b.university_group then
       raise exception 'You are both from %. This square needs someone from a different university.',
-        a.university using errcode = 'GB302';
-    end if;
-
-  elsif c.rule = 'diff_club_entity' then
-    if a.university_key = b.university_key and a.club_key = b.club_key then
-      raise exception 'You are both in % at %. This square needs someone from a different club.',
-        a.club, a.university using errcode = 'GB303';
+        university_label(a.id) using errcode = 'GB302';
     end if;
   end if;
+end $$;
+
+-- Rate limit on the scan-resolve/preview path — hygiene at this scale,
+-- reusing the same windowed-count mechanism as posts and replies.
+create or replace function rpc_assert_scan_resolve_rate(p_player_id uuid)
+returns void language plpgsql as $$
+begin
+  perform assert_rate(p_player_id, 'scan_resolve', 10, interval '1 minute');
 end $$;
 
 -- ---------------------------------------------------------------------

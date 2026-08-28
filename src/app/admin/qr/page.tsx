@@ -61,7 +61,7 @@ export default function QrPage() {
 
   const share = async () => {
     try {
-      if (navigator.share) await navigator.share({ title: 'GSG Clubs Networking Bingo', url });
+      if (navigator.share) await navigator.share({ title: 'DataCamp Scholarship Networking Bingo', url });
       else {
         await navigator.clipboard.writeText(url);
         toast.show('Link copied.');
@@ -99,7 +99,7 @@ export default function QrPage() {
 
       {/* ------------------------------------------------- the printed sheet */}
       <div className="print-sheet mt-8 rounded-2xl border border-line-strong bg-white p-8 text-center text-black">
-        <p className="font-mono text-xs uppercase tracking-[0.3em] text-black/60">GSG Clubs</p>
+        <p className="font-mono text-xs uppercase tracking-[0.3em] text-black/60">DataCamp Scholarship</p>
         <h2 className="mt-2 font-display text-4xl font-bold leading-tight text-black">
           Networking Bingo
         </h2>

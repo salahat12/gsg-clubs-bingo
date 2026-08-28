@@ -58,9 +58,9 @@ export function Constellation({ clusters, players, display = false }: Props) {
   const byUniversity = useMemo(() => {
     const map = new Map<string, LobbyPlayer[]>();
     for (const p of players) {
-      const list = map.get(p.university_key);
+      const list = map.get(p.university_value);
       if (list) list.push(p);
-      else map.set(p.university_key, [p]);
+      else map.set(p.university_value, [p]);
     }
     return map;
   }, [players]);
@@ -113,13 +113,13 @@ export function Constellation({ clusters, players, display = false }: Props) {
     return (
       <div className="space-y-5">
         {ordered.map((c) => (
-          <section key={c.university_key}>
+          <section key={c.university_value}>
             <h3 className={cx('font-display font-semibold flex items-baseline gap-2', display ? 'text-2xl' : 'text-base')}>
               {c.university}
               <span className="font-mono text-accent tabular text-[0.8em]">{c.player_count}</span>
             </h3>
             <ul className={cx('mt-1.5 flex flex-wrap gap-x-2 gap-y-1 text-ink-muted', display ? 'text-lg' : 'text-sm')}>
-              {(byUniversity.get(c.university_key) ?? []).map((p) => (
+              {(byUniversity.get(c.university_value) ?? []).map((p) => (
                 <li key={p.id} className="after:content-['·'] after:ml-2 after:text-ink-faint last:after:content-['']">
                   {p.display_name}
                 </li>
@@ -135,9 +135,9 @@ export function Constellation({ clusters, players, display = false }: Props) {
     <div className="flex flex-wrap items-start justify-center gap-x-6 gap-y-8">
       {ordered.map((cluster) => (
         <Cluster
-          key={cluster.university_key}
+          key={cluster.university_value}
           cluster={cluster}
-          members={byUniversity.get(cluster.university_key) ?? []}
+          members={byUniversity.get(cluster.university_value) ?? []}
           fresh={fresh}
           display={display}
         />
@@ -193,7 +193,7 @@ function Cluster({
         className="overflow-visible"
       >
         <defs>
-          <radialGradient id={`halo-${cluster.university_key.replace(/\W/g, '')}`}>
+          <radialGradient id={`halo-${cluster.university_value.replace(/\W/g, '')}`}>
             <stop offset="0%" stopColor="var(--color-accent)" stopOpacity="0.13" />
             <stop offset="70%" stopColor="var(--color-accent)" stopOpacity="0.04" />
             <stop offset="100%" stopColor="var(--color-accent)" stopOpacity="0" />
@@ -202,7 +202,7 @@ function Cluster({
 
         <circle
           cx={radius} cy={radius} r={radius}
-          fill={`url(#halo-${cluster.university_key.replace(/\W/g, '')})`}
+          fill={`url(#halo-${cluster.university_value.replace(/\W/g, '')})`}
         />
 
         <g style={{ filter: 'drop-shadow(0 0 3px color-mix(in oklab, var(--color-accent) 60%, transparent))' }}>
@@ -222,7 +222,7 @@ function Cluster({
               transformOrigin: `${s.x}px ${s.y}px`,
             }}
           >
-            <title>{s.player.display_name} · {s.player.club}</title>
+            <title>{s.player.display_name}</title>
           </circle>
         ))}
         </g>

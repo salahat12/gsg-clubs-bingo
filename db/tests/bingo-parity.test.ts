@@ -17,8 +17,8 @@ describe('client and server agree on what a line is', () => {
 
   beforeAll(async () => {
     db = await freshDb();
-    const a = await joinPlayer(db, 'Bara', 'IUG', 'GDSC');
-    const b = await joinPlayer(db, 'Sara', 'AUG', 'IEEE');
+    const a = await joinPlayer(db, 'Bara', { university: 'aqu' });
+    const b = await joinPlayer(db, 'Sara', { university: 'hu' });
     await startEvent(db, 0);
     cardId = a.card_id;
     byPlayer = b.player_id;
@@ -27,11 +27,15 @@ describe('client and server agree on what a line is', () => {
   const applyPattern = async (filled: boolean[]) => {
     const idxs = filled.map((f, i) => (f ? i : -1)).filter((i) => i >= 0);
     await db.query(
-      `update card_squares set status='empty', filled_at=null, filled_by_player_id=null
+      `update card_squares
+          set status='empty', filled_at=null, filled_by_player_id=null,
+              filled_by_name=null, filled_by_university=null
         where card_id = $1`, [cardId]);
     if (idxs.length) {
       await db.query(
-        `update card_squares set status='filled', filled_at=now(), filled_by_player_id=$2
+        `update card_squares
+            set status='filled', filled_at=now(), filled_by_player_id=$2,
+                filled_by_name='Sara', filled_by_university='Test University'
           where card_id = $1 and idx = any($3::int[])`, [cardId, byPlayer, idxs]);
     }
     return ((await call<string[]>(db, `complete_lines($1)`, [cardId])) ?? []).slice().sort();

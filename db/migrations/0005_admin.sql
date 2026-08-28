@@ -100,7 +100,7 @@ create or replace function rpc_admin_update_criterion(
 ) returns jsonb language plpgsql security definer set search_path = public as $$
 declare c criteria%rowtype;
 begin
-  if p_rule is not null and p_rule not in ('honor','diff_university','diff_club_entity') then
+  if p_rule is not null and p_rule not in ('honor','diff_university') then
     raise exception 'Unknown rule: %', p_rule using errcode = 'GB403';
   end if;
   update criteria
@@ -149,25 +149,19 @@ begin
   end if;
   update posts set status = 'closed', closed_at = now()
    where player_id = p_player_id and status = 'open';
-  update match_confirmations set status = 'cancelled', responded_at = now()
-   where status = 'pending' and (requester_id = p_player_id or confirmer_id = p_player_id);
-  update card_squares set status = 'empty'
-   where status = 'pending'
-     and id in (select requester_square_id from match_confirmations
-                where status = 'cancelled' and requester_id = p_player_id);
   return jsonb_build_object('player_id', p_player_id, 'removed', true);
 end $$;
 
 -- ---------------------------------------------------------------------
--- Undo a confirmed square. Refunds the pair budget and withdraws any
--- BINGO whose line no longer holds — the leaderboard must not keep a
--- line that has a hole in it.
+-- Undo a filled square. Refunds the pair budget and withdraws any BINGO
+-- whose line no longer holds — the leaderboard must not keep a line that
+-- has a hole in it. Used both for moderation and for settling the
+-- criterion-15 argument ("longest streak") the honest way.
 -- ---------------------------------------------------------------------
 create or replace function rpc_admin_undo_square(p_square_id uuid)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   sq        card_squares%rowtype;
-  mc        match_confirmations%rowtype;
   v_player  uuid;
   v_event   uuid;
 begin
@@ -181,22 +175,18 @@ begin
 
   select c.player_id, c.event_id into v_player, v_event from cards c where c.id = sq.card_id;
 
-  select * into mc from match_confirmations
-   where requester_square_id = sq.id and status = 'confirmed'
-   order by responded_at desc limit 1;
-
-  update card_squares
-     set status = 'empty', filled_by_player_id = null, filled_at = null
-   where id = sq.id;
-
-  if found then
-    update match_confirmations set status = 'cancelled' where id = mc.id;
+  if sq.filled_by_player_id is not null then
     update pair_matches
        set matched_count = greatest(0, matched_count - 1)
      where event_id = v_event
-       and player_lo = least(mc.requester_id, mc.confirmer_id)
-       and player_hi = greatest(mc.requester_id, mc.confirmer_id);
+       and player_lo = least(v_player, sq.filled_by_player_id)
+       and player_hi = greatest(v_player, sq.filled_by_player_id);
   end if;
+
+  update card_squares
+     set status = 'empty', filled_by_player_id = null,
+         filled_by_name = null, filled_by_university = null, filled_at = null
+   where id = sq.id;
 
   perform recompute_bingos(v_player);
 

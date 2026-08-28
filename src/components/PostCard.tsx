@@ -4,29 +4,25 @@ import { useState } from 'react';
 import { ApiError, QueuedError, send } from '@/lib/mutate';
 import { newClientKey } from '@/lib/session';
 import { Button, Spinner, cx, relativeTime } from './ui';
-import type { BoardPost, BoardReply, CardSquare } from '@/lib/types';
+import type { BoardPost, BoardReply } from '@/lib/types';
 
 /**
  * One post on the Requests & Offers board, with its thread.
  *
- * Who may start a match is the subtle part. The person whose square fills
- * is always the one who initiates, and the other person always confirms —
- * so on a Request the author picks from their repliers, and on an Offer a
- * replier picks the author. That keeps a square from ever being marked by
- * the person it belongs to, whichever way round the post was written.
+ * The board is purely a finding tool now — posting, replying, and closing
+ * have no mechanical link to a square filling. Once you find the right
+ * person here, you go meet them and scan them; that is what actually
+ * fills the square.
  */
 export function PostCard({
-  post, replies, expanded, onToggle, myPlayerId, mySquareForCriterion, onMatch, onClose, busyMatch, locked,
+  post, replies, expanded, onToggle, myPlayerId, onClose, locked,
 }: {
   post: BoardPost;
   replies: BoardReply[] | undefined;
   expanded: boolean;
   onToggle: () => void;
   myPlayerId: string | null;
-  mySquareForCriterion: CardSquare | null;
-  onMatch: (opts: { confirmerId: string; squareId: string; postId: string; name: string }) => void;
   onClose: (postId: string) => void;
-  busyMatch: boolean;
   locked: boolean;
 }) {
   const [draft, setDraft] = useState('');
@@ -37,17 +33,6 @@ export function PostCard({
   const mine = post.player_id === myPlayerId;
   const isRequest = post.kind === 'request';
   const allReplies = [...(replies ?? []), ...optimistic];
-
-  // A Request post: I own the square, so I mark one of my repliers.
-  const canMatchRepliers = mine && isRequest && post.status === 'open' && Boolean(post.card_square_id);
-  // An Offer post from someone else: their claim fills MY square.
-  const canMatchAuthor =
-    !mine && !isRequest && post.status === 'open' &&
-    Boolean(mySquareForCriterion && mySquareForCriterion.status === 'empty');
-
-  const repliers = Array.from(
-    new Map(allReplies.filter((r) => r.player_id !== myPlayerId).map((r) => [r.player_id, r])).values(),
-  );
 
   const sendReply = async () => {
     const text = draft.trim();
@@ -65,7 +50,6 @@ export function PostCard({
       created_at: new Date().toISOString(),
       display_name: 'You',
       university: '',
-      club: '',
     };
     setOptimistic((o) => [...o, temp]);
     setDraft('');
@@ -109,7 +93,7 @@ export function PostCard({
           </span>
           {post.status === 'closed' && (
             <span className="rounded bg-surface-3 px-1.5 py-0.5 font-mono uppercase tracking-wider text-ink-faint">
-              Matched
+              Closed
             </span>
           )}
           <span className="ml-auto font-mono text-ink-faint">{relativeTime(post.created_at)}</span>
@@ -121,7 +105,7 @@ export function PostCard({
 
         <p className="mt-1.5 text-sm text-ink-muted">
           <span className="text-ink">{post.display_name}</span>
-          {mine && <span className="text-accent"> (you)</span>} · {post.university} · {post.club}
+          {mine && <span className="text-accent"> (you)</span>} · {post.university}
         </p>
 
         {post.note && (
@@ -140,25 +124,6 @@ export function PostCard({
               ? `${allReplies.length} ${allReplies.length === 1 ? 'reply' : 'replies'}`
               : 'Reply'}
           </button>
-
-          {canMatchAuthor && !locked && (
-            <Button
-              size="md"
-              busy={busyMatch}
-              onClick={() =>
-                mySquareForCriterion &&
-                onMatch({
-                  confirmerId: post.player_id,
-                  squareId: mySquareForCriterion.id,
-                  postId: post.id,
-                  name: post.display_name,
-                })
-              }
-              className="ml-auto"
-            >
-              Mark {post.display_name} as my match
-            </Button>
-          )}
 
           {mine && post.status === 'open' && (
             <button
@@ -198,25 +163,6 @@ export function PostCard({
                       </span>
                     </p>
                     <p className="text-[15px] leading-snug text-ink-muted">{r.body}</p>
-
-                    {canMatchRepliers && !locked && (
-                      <Button
-                        variant="secondary"
-                        className="mt-1.5"
-                        busy={busyMatch}
-                        onClick={() =>
-                          post.card_square_id &&
-                          onMatch({
-                            confirmerId: r.player_id,
-                            squareId: post.card_square_id,
-                            postId: post.id,
-                            name: r.display_name,
-                          })
-                        }
-                      >
-                        Mark {r.display_name} as my match
-                      </Button>
-                    )}
                   </div>
                 </li>
               ))}
@@ -246,12 +192,6 @@ export function PostCard({
           )}
 
           {notice && <p role="status" className="mt-2 text-xs text-ink-muted">{notice}</p>}
-
-          {repliers.length > 0 && canMatchRepliers && !locked && (
-            <p className="mt-2 text-xs text-ink-muted">
-              Only mark someone once you have actually met. They have to confirm before the square fills.
-            </p>
-          )}
         </div>
       )}
     </li>

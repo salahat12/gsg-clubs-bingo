@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useLive, useLiveQuery } from '@/lib/live';
-import { fetchBoard, fetchCriteria, fetchEvent, fetchLobbyPlayers, fetchStats } from '@/lib/reads';
+import { fetchBoard, fetchCriteria, fetchEvent, fetchFillFeed, fetchLobbyPlayers, fetchStats } from '@/lib/reads';
 import { ApiError, send } from '@/lib/mutate';
 import { Button, Field, Sheet, Spinner, cx, inputClass, relativeTime, useToast } from '@/components/ui';
 import type { Criterion } from '@/lib/types';
@@ -121,6 +121,14 @@ function Console() {
     intervalMs: 8_000,
   });
 
+  const { data: fills, refetch: refetchFills } = useLiveQuery({
+    tables: ['card_squares'],
+    fetcher: () => (event ? fetchFillFeed(event.id, 40) : Promise.resolve([])),
+    enabled: Boolean(event),
+    deps: [event?.id],
+    intervalMs: 4_000,
+  });
+
   const act = useCallback(
     async (action: EventAction, confirm?: string) => {
       setBusy(action);
@@ -144,12 +152,12 @@ function Console() {
       try {
         await send('/api/admin/moderate', { action, id, hidden });
         toast.show('Done.');
-        refetchPlayers(); refetchPosts(); refetchStats();
+        refetchPlayers(); refetchPosts(); refetchStats(); refetchFills();
       } catch (err) {
         toast.fail(err instanceof ApiError ? err.message : 'That did not work.');
       }
     },
-    [toast, refetchPlayers, refetchPosts, refetchStats],
+    [toast, refetchPlayers, refetchPosts, refetchStats, refetchFills],
   );
 
   const status = event?.status ?? 'waiting';
@@ -189,11 +197,6 @@ function Console() {
           <Stat label="Lines total" value={stats?.lines_completed} />
           <Stat label="Board posts" value={stats?.posts_count} />
         </div>
-        {typeof stats?.pending_matches === 'number' && stats.pending_matches > 0 && (
-          <p className="mt-2 text-sm text-ink-muted">
-            {stats.pending_matches} confirmation{stats.pending_matches === 1 ? '' : 's'} waiting on someone.
-          </p>
-        )}
       </section>
 
       {/* --------------------------------------------------- event controls */}
@@ -292,7 +295,34 @@ function Console() {
       <section className="mt-8" aria-labelledby="mod-h">
         <h2 id="mod-h" className="font-display text-lg font-semibold">Moderate</h2>
 
-        <h3 className="mt-3 text-sm font-medium text-ink-muted">Recent posts</h3>
+        <h3 className="text-sm font-medium text-ink-muted">
+          Live fills — watch for anyone farming one person
+        </h3>
+        <ul className="mt-2 max-h-64 space-y-1.5 overflow-y-auto">
+          {(fills ?? []).slice(0, 20).map((f) => (
+            <li key={f.square_id} className="flex items-start gap-2 rounded-lg border border-line bg-surface px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm">
+                  <span className="text-ink">{f.owner_name}</span>
+                  <span className="text-ink-muted"> scanned </span>
+                  <span className="text-ink">{f.filled_by_name}</span>
+                </p>
+                <p className="truncate text-xs text-ink-muted">
+                  {f.criterion_text} · {relativeTime(f.filled_at)}
+                </p>
+              </div>
+              <button
+                onClick={() => { if (confirm('Undo this fill? It frees the square and refunds their pair cap slot.')) moderate('undo_square', f.square_id); }}
+                className="shrink-0 text-xs text-bingo-text underline underline-offset-2"
+              >
+                Undo
+              </button>
+            </li>
+          ))}
+          {(fills ?? []).length === 0 && <li className="text-sm text-ink-muted">Nobody has filled a square yet.</li>}
+        </ul>
+
+        <h3 className="mt-5 text-sm font-medium text-ink-muted">Recent posts</h3>
         <ul className="mt-2 space-y-1.5">
           {(posts ?? []).slice(0, 12).map((p) => (
             <li key={p.id} className="flex items-start gap-2 rounded-lg border border-line bg-surface px-3 py-2">
@@ -319,7 +349,7 @@ function Console() {
             <li key={p.id} className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm">{p.display_name}</p>
-                <p className="truncate text-xs text-ink-muted">{p.university} · {p.club}</p>
+                <p className="truncate text-xs text-ink-muted">{p.university}</p>
               </div>
               <button
                 onClick={() => { if (confirm(`Remove ${p.display_name}? Their card stops working immediately.`)) moderate('remove_player', p.id); }}
@@ -428,7 +458,6 @@ function CriterionEditor({
           <select id={id} value={rule} onChange={(e) => setRule(e.target.value as Criterion['rule'])} className={inputClass}>
             <option value="honor">Honour system — the two people vouch for each other</option>
             <option value="diff_university">Must be a different university</option>
-            <option value="diff_club_entity">Must be a different club</option>
           </select>
         )}
       </Field>

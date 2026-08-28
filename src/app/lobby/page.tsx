@@ -160,7 +160,7 @@ function Lobby() {
           <div className="rounded-lg border border-line-strong bg-surface-2 px-4 py-3">
             <p className="text-sm text-ink-muted">You are playing as</p>
             <p className="mt-0.5 font-display font-semibold">{player?.displayName}</p>
-            <p className="text-sm text-ink-muted">{player?.university} · {player?.club}</p>
+            <p className="text-sm text-ink-muted">{player?.university}</p>
           </div>
 
           <Link href="/leaderboard" className="block">

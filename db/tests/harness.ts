@@ -37,12 +37,13 @@ export type Player = {
 export async function joinPlayer(
   db: PGlite,
   name: string,
-  university = 'Islamic University of Gaza',
-  club = 'GDSC',
+  opts: { university?: string; otherText?: string } = {},
 ): Promise<Player> {
+  const university = opts.university ?? 'aqu';
+  const otherText = university === 'other' ? (opts.otherText ?? `${name}'s uni`) : null;
   const r = await db.query<{ rpc_join: Player }>(
     `select rpc_join($1,$2,$3,$4) as rpc_join`,
-    [EVENT_SLUG, name, university, club],
+    [EVENT_SLUG, name, university, otherText],
   );
   return r.rows[0].rpc_join;
 }
@@ -94,16 +95,22 @@ export async function squareByIdx(db: PGlite, cardId: string, idx: number) {
 }
 
 /**
- * Fill a square directly, bypassing the match flow. Used only to set up
+ * Fill a square directly, bypassing the scan flow. Used only to set up
  * board states for line-detection tests — never as a substitute for
- * testing the real confirmation path.
+ * testing the real scan-fill path.
  */
 export async function forceFill(db: PGlite, squareId: string, byPlayerId: string) {
+  const p = await db.query<{ display_name: string }>(
+    `select display_name from players where id = $1`,
+    [byPlayerId],
+  );
+  const name = p.rows[0]?.display_name ?? 'Someone';
   await db.query(
     `update card_squares
-        set status='filled', filled_by_player_id=$2, filled_at=now()
+        set status='filled', filled_by_player_id=$2, filled_by_name=$3,
+            filled_by_university='Test University', filled_at=now()
       where id = $1`,
-    [squareId, byPlayerId],
+    [squareId, byPlayerId, name],
   );
 }
 
@@ -125,30 +132,20 @@ export async function resetGame(db: PGlite) {
   await db.exec(readFileSync(join(ROOT, 'db', 'seed.sql'), 'utf8'));
 }
 
-/** Post a request, ask someone to vouch, and have them confirm it. */
-export async function fullMatch(
+/** Scan `scanned` from `scanning`'s card, filling the square for a given criterion. */
+export async function scanFill(
   db: PGlite,
-  requester: Player,
-  confirmer: Player,
+  scanning: Player,
+  scanned: Player,
   criterionPosition: number,
-  opts: { reciprocalSquareId?: string | null; clientKey?: string } = {},
+  opts: { clientKey?: string } = {},
 ) {
-  const sq = await squareAt(db, requester.card_id, criterionPosition);
-  const post = await call<{ post_id: string }>(
-    db,
-    `rpc_create_post($1,$2,$3,$4,$5)`,
-    [requester.player_id, sq.id, 'request', null, opts.clientKey ?? `k-${sq.id}`],
-  );
-  const mc = await call<{ confirmation_id: string }>(
-    db,
-    `rpc_request_match($1,$2,$3,$4)`,
-    [requester.player_id, confirmer.player_id, sq.id, post.post_id],
-  );
-  return call(db, `rpc_respond_match($1,$2,$3,$4)`, [
-    mc.confirmation_id,
-    confirmer.player_id,
-    'confirm',
-    opts.reciprocalSquareId ?? null,
+  const sq = await squareAt(db, scanning.card_id, criterionPosition);
+  return call(db, `rpc_scan_fill($1,$2,$3,$4)`, [
+    scanning.player_id,
+    sq.id,
+    scanned.player_id,
+    opts.clientKey ?? `k-${sq.id}-${scanned.player_id}`,
   ]);
 }
 

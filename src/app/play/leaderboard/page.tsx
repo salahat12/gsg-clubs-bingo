@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { usePlayer } from '@/lib/player';
 import { useLiveQuery } from '@/lib/live';
-import { fetchEvent, fetchLeaderboard } from '@/lib/reads';
-import { Leaderboard } from '@/components/Leaderboard';
+import { fetchEvent, fetchLeaderboard, fetchTopHelpers } from '@/lib/reads';
+import { Leaderboard, TopHelpers } from '@/components/Leaderboard';
 import { Spinner } from '@/components/ui';
 
 export default function PlayLeaderboardPage() {
@@ -14,6 +14,13 @@ export default function PlayLeaderboardPage() {
   const { data: rows, loading } = useLiveQuery({
     tables: ['bingos'],
     fetcher: () => (event ? fetchLeaderboard(event.id) : Promise.resolve([])),
+    enabled: Boolean(event),
+    deps: [event?.id],
+  });
+
+  const { data: helpers } = useLiveQuery({
+    tables: ['card_squares'],
+    fetcher: () => (event ? fetchTopHelpers(event.id) : Promise.resolve([])),
     enabled: Boolean(event),
     deps: [event?.id],
   });
@@ -37,6 +44,12 @@ export default function PlayLeaderboardPage() {
           <Leaderboard rows={rows ?? []} meId={player?.id} />
         )}
       </div>
+
+      {helpers && helpers.length > 0 && (
+        <div className="mt-6">
+          <TopHelpers rows={helpers} />
+        </div>
+      )}
 
       <p className="mt-6 text-center text-xs text-ink-muted">
         Times run from when the organiser started the game.{' '}

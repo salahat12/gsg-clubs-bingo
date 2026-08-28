@@ -25,8 +25,8 @@ describe('start gate', () => {
 
   beforeEach(async () => {
     await resetGame(db);
-    a = await joinPlayer(db, 'Bara', 'IUG', 'GDSC');
-    b = await joinPlayer(db, 'Sara', 'AUG', 'IEEE');
+    a = await joinPlayer(db, 'Bara', { university: 'aqu' });
+    b = await joinPlayer(db, 'Sara', { university: 'hu' });
   });
 
   /** Every player-facing write, as a callable, for table-driven testing. */
@@ -40,11 +40,11 @@ describe('start gate', () => {
       },
     },
     {
-      name: 'ask someone to vouch',
+      name: 'scan a fill',
       run: async () => {
         const sq = await squareAt(db, a.card_id, 3);
-        return call(db, `rpc_request_match($1,$2,$3,$4)`,
-          [a.player_id, b.player_id, sq.id, null]);
+        return call(db, `rpc_scan_fill($1,$2,$3,$4)`,
+          [a.player_id, sq.id, b.player_id, `sg-${Math.random()}`]);
       },
     },
   ];
@@ -57,7 +57,7 @@ describe('start gate', () => {
     });
 
     it('still allows joining, so people can fill the lobby', async () => {
-      const p = await joinPlayer(db, 'Late', 'IUG', 'IEEE');
+      const p = await joinPlayer(db, 'Late', { university: 'aqu' });
       expect(p.player_id).toBeTruthy();
     });
   });
@@ -124,7 +124,7 @@ describe('start gate', () => {
     });
 
     it('refuses new joins', async () => {
-      const err = await expectError(() => joinPlayer(db, 'TooLate', 'IUG', 'GDSC'));
+      const err = await expectError(() => joinPlayer(db, 'TooLate', { university: 'aqu' }));
       expect(err.code).toBe('GB102');
     });
   });
@@ -132,7 +132,7 @@ describe('start gate', () => {
   describe('joining', () => {
     it('is refused once the admin closes it', async () => {
       await call(db, `rpc_admin_event($1,$2)`, [EVENT_SLUG, 'close_join']);
-      const err = await expectError(() => joinPlayer(db, 'Nope', 'IUG', 'GDSC'));
+      const err = await expectError(() => joinPlayer(db, 'Nope', { university: 'aqu' }));
       expect(err.code).toBe('GB104');
       expect(err.message).toMatch(/joining is closed/i);
     });
@@ -140,12 +140,12 @@ describe('start gate', () => {
     it('reopens when the admin reopens it', async () => {
       await call(db, `rpc_admin_event($1,$2)`, [EVENT_SLUG, 'close_join']);
       await call(db, `rpc_admin_event($1,$2)`, [EVENT_SLUG, 'open_join']);
-      await expect(joinPlayer(db, 'Yes', 'IUG', 'GDSC')).resolves.toBeTruthy();
+      await expect(joinPlayer(db, 'Yes', { university: 'aqu' })).resolves.toBeTruthy();
     });
 
     it('marks mid-race arrivals as late joiners', async () => {
       await startEvent(db, 0);
-      const late = await joinPlayer(db, 'Latecomer', 'IUG', 'IEEE');
+      const late = await joinPlayer(db, 'Latecomer', { university: 'aqu' });
       expect(late.joined_late).toBe(true);
 
       const early = await db.query<{ joined_late: boolean }>(

@@ -10,7 +10,7 @@ import { freshDb, joinPlayer, startEvent, asRole, expectError, squareAt } from '
  * That last one matters most. Supabase exposes every function in the
  * public schema over PostgREST as /rest/v1/rpc/<name>. Without the
  * EXECUTE revoke in 0007_rls.sql, anyone with the anon key — which ships
- * in the browser bundle — could call rpc_respond_match and fill their own
+ * in the browser bundle — could call rpc_scan_fill and fill their own
  * card. These tests are the guard on that.
  */
 describe('anon cannot write', () => {
@@ -19,17 +19,17 @@ describe('anon cannot write', () => {
 
   beforeAll(async () => {
     db = await freshDb();
-    player = await joinPlayer(db, 'Bara', 'IUG', 'GDSC');
+    player = await joinPlayer(db, 'Bara', { university: 'aqu' });
     await startEvent(db, 0);
   });
 
   const readable = [
-    'events', 'criteria', 'players', 'cards', 'card_squares',
-    'posts', 'replies', 'match_confirmations', 'bingos',
+    'events', 'universities', 'criteria', 'players', 'cards', 'card_squares',
+    'posts', 'replies', 'bingos',
   ];
   const views = [
     'v_lobby_players', 'v_lobby_clusters', 'v_board_posts', 'v_board_replies',
-    'v_leaderboard', 'v_card_squares', 'v_pending_confirmations', 'v_event_stats',
+    'v_leaderboard', 'v_top_helpers', 'v_card_squares', 'v_fill_feed', 'v_event_stats',
   ];
 
   it.each(readable)('can read %s', async (table) => {
@@ -89,10 +89,11 @@ describe('anon cannot write', () => {
   });
 
   const rpcs = [
-    `rpc_join('gsg-clubs','X','Y','Z')`,
+    `rpc_join('gsg-clubs','X','aqu',null)`,
     `rpc_admin_event('gsg-clubs','start')`,
-    `rpc_respond_match('00000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','confirm',null)`,
+    `rpc_scan_fill('00000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','k')`,
     `rpc_admin_undo_square('00000000-0000-0000-0000-000000000000')`,
+    `rpc_assert_scan_resolve_rate('00000000-0000-0000-0000-000000000000')`,
     `rpc_admin_remove_player('00000000-0000-0000-0000-000000000000')`,
     `record_bingos('00000000-0000-0000-0000-000000000000')`,
     `assert_playable('00000000-0000-0000-0000-000000000000')`,
@@ -128,7 +129,7 @@ describe('anon cannot write', () => {
   });
 
   it('removed players are invisible to anon at the row level', async () => {
-    const gone = await joinPlayer(db, 'Ghost', 'IUG', 'IEEE');
+    const gone = await joinPlayer(db, 'Ghost', { university: 'aqu' });
     await db.query(`select rpc_admin_remove_player($1)`, [gone.player_id]);
     await asRole(db, 'anon', async () => {
       const r = await db.query(`select id from players where id = $1`, [gone.player_id]);
@@ -143,7 +144,7 @@ describe('rate limiting', () => {
   beforeAll(async () => { db = await freshDb(); });
 
   it('caps posting and keeps the message actionable', async () => {
-    const p = await joinPlayer(db, 'Spammer', 'IUG', 'GDSC');
+    const p = await joinPlayer(db, 'Spammer', { university: 'aqu' });
     await startEvent(db, 0);
 
     // 10 posts per minute; each needs its own square to avoid the
@@ -161,7 +162,7 @@ describe('rate limiting', () => {
   });
 
   it('a retried write with the same client key is not a second post', async () => {
-    const p = await joinPlayer(db, 'Flaky', 'AUG', 'IEEE');
+    const p = await joinPlayer(db, 'Flaky', { university: 'hu' });
     const sq = await squareAt(db, p.card_id, 3);
 
     const first: any = await db.query(

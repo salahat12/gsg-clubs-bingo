@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { usePlayer } from '@/lib/player';
 import { useLiveQuery } from '@/lib/live';
-import { BOARD_PAGE, fetchBoard, fetchCard, fetchEvent, fetchRepliesFor } from '@/lib/reads';
+import { BOARD_PAGE, fetchBoard, fetchEvent, fetchRepliesFor } from '@/lib/reads';
 import { ApiError, send } from '@/lib/mutate';
 import { PostCard } from '@/components/PostCard';
 import { Button, EmptyState, Spinner, cx, useToast } from '@/components/ui';
@@ -40,7 +40,6 @@ function Board() {
   const [pageSize, setPageSize] = useState(BOARD_PAGE);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [expandedFocusPost, setExpandedFocusPost] = useState<string | null>(null);
-  const [busyMatch, setBusyMatch] = useState(false);
 
   useEffect(() => {
     const id = setTimeout(() => setDebounced(search), 250);
@@ -76,20 +75,6 @@ function Board() {
     deps: [expandedIds.join(',')],
   });
 
-  const { data: myCard, refetch: refetchCard } = useLiveQuery({
-    tables: ['card_squares'],
-    fetcher: () => (player ? fetchCard(player.id) : Promise.resolve([])),
-    enabled: Boolean(player),
-    deps: [player?.id],
-    intervalMs: 10_000,
-  });
-
-  const squareByCriterion = useMemo(() => {
-    const map = new Map<string, NonNullable<typeof myCard>[number]>();
-    for (const s of myCard ?? []) map.set(s.criterion_id, s);
-    return map;
-  }, [myCard]);
-
   const toggle = useCallback((id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -98,23 +83,6 @@ function Board() {
       return next;
     });
   }, []);
-
-  const onMatch = useCallback(
-    async ({ confirmerId, squareId, postId, name }: { confirmerId: string; squareId: string; postId: string; name: string }) => {
-      setBusyMatch(true);
-      try {
-        await send('/api/match/request', { confirmerId, squareId, postId });
-        toast.show(`Asked ${name} to confirm. Your square is held until they answer.`);
-        refetchCard();
-        refetchBoard();
-      } catch (err) {
-        toast.fail(err instanceof ApiError ? err.message : 'Could not send that. Try again.');
-      } finally {
-        setBusyMatch(false);
-      }
-    },
-    [toast, refetchCard, refetchBoard],
-  );
 
   const onClosePost = useCallback(
     async (postId: string) => {
@@ -237,10 +205,7 @@ function Board() {
                 expanded={expanded.has(post.id)}
                 onToggle={() => { toggle(post.id); refetchReplies(); }}
                 myPlayerId={player?.id ?? null}
-                mySquareForCriterion={squareByCriterion.get(post.criterion_id) ?? null}
-                onMatch={onMatch}
                 onClose={onClosePost}
-                busyMatch={busyMatch}
                 locked={locked}
               />
             ))}

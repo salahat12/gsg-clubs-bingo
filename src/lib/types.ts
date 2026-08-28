@@ -14,7 +14,7 @@ export type EventState = {
 
 export type LobbyCluster = {
   event_id: string;
-  university_key: string;
+  university_value: string;
   university: string;
   player_count: number;
   first_joined_at: string;
@@ -24,9 +24,8 @@ export type LobbyPlayer = {
   id: string;
   event_id: string;
   display_name: string;
+  university_value: string;
   university: string;
-  university_key: string;
-  club: string;
   joined_at: string;
   joined_late: boolean;
 };
@@ -46,7 +45,6 @@ export type BoardPost = {
   closed_at: string | null;
   display_name: string;
   university: string;
-  club: string;
   criterion_text: string;
   criterion_position: number;
   reply_count: number;
@@ -61,10 +59,10 @@ export type BoardReply = {
   created_at: string;
   display_name: string;
   university: string;
-  club: string;
 };
 
-export type SquareStatus = 'empty' | 'pending' | 'filled';
+export type SquareStatus = 'empty' | 'filled';
+export type CriterionRule = 'honor' | 'diff_university';
 
 export type CardSquare = {
   id: string;
@@ -75,30 +73,28 @@ export type CardSquare = {
   criterion_id: string;
   status: SquareStatus;
   filled_by_player_id: string | null;
+  filled_by_name: string | null;
+  filled_by_university: string | null;
   filled_at: string | null;
   criterion_text: string;
   criterion_position: number;
-  criterion_rule: 'honor' | 'diff_university' | 'diff_club_entity';
-  filled_by_name: string | null;
-  filled_by_university: string | null;
-  filled_by_club: string | null;
+  criterion_rule: CriterionRule;
 };
 
-export type PendingConfirmation = {
-  id: string;
+/** A single fill, newest first — the admin live feed, and (filtered
+ *  client-side by owner_id) a player's own "People I met". */
+export type FillFeedRow = {
+  square_id: string;
   event_id: string;
-  requester_id: string;
-  confirmer_id: string;
+  owner_id: string;
+  owner_name: string;
   criterion_id: string;
-  requester_square_id: string;
-  status: 'pending';
-  created_at: string;
-  post_id: string | null;
-  requester_name: string;
-  requester_university: string;
-  requester_club: string;
-  confirmer_name: string;
   criterion_text: string;
+  criterion_position: number;
+  filled_by_player_id: string | null;
+  filled_by_name: string;
+  filled_by_university: string;
+  filled_at: string;
 };
 
 export type LeaderboardRow = {
@@ -106,12 +102,20 @@ export type LeaderboardRow = {
   event_id: string;
   display_name: string;
   university: string;
-  club: string;
   joined_late: boolean;
   bingo_at: string;
   elapsed_ms: number;
   first_line: string;
   lines_completed: number;
+};
+
+/** The second prize: most-scanned players, not capped by the pair cap. */
+export type TopHelperRow = {
+  event_id: string;
+  player_id: string;
+  display_name: string;
+  university: string;
+  helped_count: number;
 };
 
 export type EventStats = {
@@ -126,14 +130,13 @@ export type EventStats = {
   players_with_bingo: number;
   lines_completed: number;
   posts_count: number;
-  pending_matches: number;
 };
 
 export type Criterion = {
   id: string;
   position: number;
   text: string;
-  rule: 'honor' | 'diff_university' | 'diff_club_entity';
+  rule: CriterionRule;
 };
 
 export type StoredPlayer = {
@@ -141,10 +144,24 @@ export type StoredPlayer = {
   cardId: string;
   eventId: string;
   displayName: string;
+  universityValue: string;
   university: string;
-  club: string;
   joinedLate: boolean;
 };
 
 export type BoardFilter = 'all' | 'requests' | 'offers' | 'mine' | 'open';
 export type BoardSort = 'newest' | 'oldest';
+
+/** The current scan credential for the calling player. */
+export type ScanCredential = {
+  token: string;
+  code: string;
+  bucket: number;
+  secondsRemaining: number;
+};
+
+export type ResolvedScan = {
+  id: string;
+  displayName: string;
+  university: string;
+};

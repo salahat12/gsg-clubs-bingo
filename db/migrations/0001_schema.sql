@@ -1,5 +1,5 @@
 -- =====================================================================
--- 0001_schema.sql — GSG Clubs Networking Bingo
+-- 0001_schema.sql — DataCamp Scholarship Networking Bingo
 -- Tables + constraints. Every game rule that CAN be expressed as a
 -- database constraint IS one; the app is not the last line of defence.
 -- =====================================================================
@@ -46,14 +46,12 @@ create table events (
 
 -- ---------------------------------------------------------------------
 -- criteria — the fixed 25 for the event.
--- `rule` drives server-side validation on confirmation:
---   honor            : the two people vouch for each other, no check
---   diff_university  : criterion 1  — universities must differ
---   diff_club_entity : criterion 22 — must be a different CLUB, where a
---                      club is identified by (university, club). So
---                      IEEE@IUG vs IEEE@AUG is a valid match, and
---                      GDSC@IUG vs IEEE@IUG is too; only the exact same
---                      club at the same university is rejected.
+-- `rule` drives server-side validation on a scan-fill:
+--   honor           : between the two people, no server check
+--   diff_university : criterion 4 — university_group must differ
+-- Criterion 7 ("was in the previous scholarship") is deliberately left as
+-- 'honor' — every attendee here is the same 2025-2026 cohort, so there is
+-- no player fact to check server-side; it's taken on faith like the rest.
 -- ---------------------------------------------------------------------
 create table criteria (
   id         uuid primary key default gen_random_uuid(),
@@ -61,33 +59,58 @@ create table criteria (
   position   int  not null check (position between 1 and 25),
   text       text not null check (length(btrim(text)) between 1 and 300),
   rule       text not null default 'honor'
-               check (rule in ('honor','diff_university','diff_club_entity')),
+               check (rule in ('honor','diff_university')),
   active     boolean not null default true,
   updated_at timestamptz not null default now(),
   unique (event_id, position)
 );
 
 -- ---------------------------------------------------------------------
+-- universities — a fixed lookup, not free text. Free text broke matching
+-- last time ("An-Najah" vs "Najah University" read as different places).
+-- Stable `value` is what's stored on a player and compared for matching;
+-- `label` is display-only and can be reworded without touching a single
+-- match. `group_key` is what criterion 4 actually compares: normally the
+-- same as `value`, except where two values are genuinely one institution
+-- for matching purposes — a `university_group` column rather than a
+-- hardcoded condition, so a future split campus works the same way.
+-- The 'other' row exists so the FK below is always satisfiable; its
+-- group_key is never read — rpc_join assigns each Other player their own
+-- unique group, per spec, so every Other matches everyone.
+-- ---------------------------------------------------------------------
+create table universities (
+  value      text primary key,
+  label      text not null,
+  group_key  text not null,
+  sort_order int  not null
+);
+
+-- ---------------------------------------------------------------------
 -- players
--- *_key columns are generated, so grouping the lobby by university and
--- comparing universities during rule checks can never drift apart from
--- each other or be bypassed by inconsistent casing/whitespace.
+-- university_group is resolved once at join (from `universities`, or a
+-- unique per-player value for 'other') and is what rule checks compare —
+-- never `university_value` directly, so label/grouping changes can never
+-- silently change who matches whom mid-event.
 -- ---------------------------------------------------------------------
 create table players (
-  id             uuid primary key default gen_random_uuid(),
-  event_id       uuid not null references events(id) on delete cascade,
-  display_name   text not null check (length(btrim(display_name)) between 1 and 60),
-  university     text not null check (length(btrim(university)) between 1 and 60),
-  club           text not null check (length(btrim(club)) between 1 and 60),
-  university_key text generated always as (lower(btrim(university))) stored,
-  club_key       text generated always as (lower(btrim(club))) stored,
-  joined_at      timestamptz not null default now(),
-  joined_late    boolean not null default false,
-  removed_at     timestamptz,
-  last_seen_at   timestamptz not null default now()
+  id                    uuid primary key default gen_random_uuid(),
+  event_id              uuid not null references events(id) on delete cascade,
+  display_name          text not null check (length(btrim(display_name)) between 1 and 60),
+  university_value      text not null references universities(value),
+  university_other_text text check (university_other_text is null
+                            or length(btrim(university_other_text)) between 1 and 60),
+  university_group      text not null,
+  joined_at             timestamptz not null default now(),
+  joined_late           boolean not null default false,
+  removed_at            timestamptz,
+  last_seen_at          timestamptz not null default now(),
+  constraint players_other_text_required check (
+    (university_value <> 'other' and university_other_text is null) or
+    (university_value =  'other' and university_other_text is not null)
+  )
 );
 create index players_event_active_idx on players(event_id) where removed_at is null;
-create index players_event_uni_idx    on players(event_id, university_key);
+create index players_event_uni_idx    on players(event_id, university_value);
 create index players_event_joined_idx on players(event_id, joined_at);
 
 -- ---------------------------------------------------------------------
@@ -110,19 +133,24 @@ create table card_squares (
   idx                 int  not null check (idx between 0 and 24),
   criterion_id        uuid not null references criteria(id),
   status              text not null default 'empty'
-                        check (status in ('empty','pending','filled')),
+                        check (status in ('empty','filled')),
   filled_by_player_id uuid references players(id) on delete set null,
-  filled_at           timestamptz,
+  -- Denormalized at fill time, deliberately. This is the visible reward on
+  -- the card and the record "People I met" reads from — it must survive
+  -- even if the matched player is later admin-removed, so it is never
+  -- re-derived from a join.
+  filled_by_name       text,
+  filled_by_university text,
+  filled_at             timestamptz,
   unique (card_id, idx),
   unique (card_id, criterion_id),
   -- A non-filled square never carries stale attribution. A filled square
-  -- always carries a timestamp, but filled_by_player_id is allowed to go
-  -- null: hard-deleting a player fires ON DELETE SET NULL here, and "this
-  -- square was filled by someone who has since been removed" is a real
-  -- state, not a corrupt one.
+  -- always carries its full snapshot together.
   constraint card_squares_fill_consistent check (
-    (status =  'filled' and filled_at is not null) or
-    (status <> 'filled' and filled_by_player_id is null and filled_at is null)
+    (status = 'filled' and filled_at is not null
+       and filled_by_name is not null and filled_by_university is not null) or
+    (status <> 'filled' and filled_by_player_id is null and filled_at is null
+       and filled_by_name is null and filled_by_university is null)
   )
 );
 create index card_squares_card_idx on card_squares(card_id, idx);
@@ -164,36 +192,20 @@ create table replies (
 create index replies_post_idx on replies(post_id, created_at);
 
 -- ---------------------------------------------------------------------
--- match_confirmations
--- The person whose square gets filled is always `requester`; the person
--- who vouches is always `confirmer`. A square is never self-markable:
--- requester_id <> confirmer_id is a CHECK, not an app-level if.
+-- fill_events — idempotency ledger for scan-fills, same pattern as posts
+-- and replies: a client-generated key means a retry after flaky venue
+-- wifi replays the stored result instead of double-filling (or erroring
+-- on "already filled" for what was actually its own request).
 -- ---------------------------------------------------------------------
-create table match_confirmations (
-  id                  uuid primary key default gen_random_uuid(),
-  event_id            uuid not null references events(id) on delete cascade,
-  post_id             uuid references posts(id) on delete set null,
-  requester_id        uuid not null references players(id) on delete cascade,
-  confirmer_id        uuid not null references players(id) on delete cascade,
-  criterion_id        uuid not null references criteria(id),
-  requester_square_id uuid not null references card_squares(id) on delete cascade,
-  status              text not null default 'pending'
-                        check (status in ('pending','confirmed','declined','cancelled')),
-  reciprocal_of       uuid references match_confirmations(id) on delete set null,
-  created_at          timestamptz not null default now(),
-  responded_at        timestamptz,
-  constraint mc_distinct_players check (requester_id <> confirmer_id),
-  constraint mc_responded_consistent check (
-    (status = 'pending' and responded_at is null) or
-    (status <> 'pending' and responded_at is not null)
-  )
+create table fill_events (
+  id         uuid primary key default gen_random_uuid(),
+  square_id  uuid not null references card_squares(id) on delete cascade,
+  player_id  uuid not null references players(id) on delete cascade,
+  client_key text not null,
+  result     jsonb not null,
+  created_at timestamptz not null default now(),
+  unique (square_id, client_key)
 );
--- at most one live confirmation per square: this is what makes the
--- 'pending' square state meaningful and stops two people racing into it
-create unique index mc_one_pending_per_square
-  on match_confirmations(requester_square_id) where status = 'pending';
-create index mc_inbox_idx  on match_confirmations(confirmer_id) where status = 'pending';
-create index mc_outbox_idx on match_confirmations(requester_id) where status = 'pending';
 
 -- ---------------------------------------------------------------------
 -- pair_matches — the "no farming one friend" cap, enforced by CHECK.

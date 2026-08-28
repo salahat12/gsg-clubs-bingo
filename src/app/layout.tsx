@@ -35,8 +35,8 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'GSG Clubs Networking Bingo',
-  description: 'Find the people, fill the squares, shout BINGO.',
+  title: 'Networking Bingo',
+  description: 'Scan the people, fill the squares, shout BINGO.',
   appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'Bingo' },
 };
 

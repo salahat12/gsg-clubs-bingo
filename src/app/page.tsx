@@ -5,12 +5,12 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { usePlayer } from '@/lib/player';
 import { useLiveQuery } from '@/lib/live';
-import { fetchClubSuggestions, fetchEvent, fetchUniversitySuggestions } from '@/lib/reads';
+import { fetchEvent } from '@/lib/reads';
 import { ApiError, send } from '@/lib/mutate';
 import { markRulesSeen } from '@/lib/session';
 import { Button, Field, Sheet, Spinner } from '@/components/ui';
-import { Autocomplete } from '@/components/Autocomplete';
 import { RulesCard } from '@/components/RulesCard';
+import { UNIVERSITIES } from '@/lib/config';
 import type { StoredPlayer } from '@/lib/types';
 
 export default function JoinPage() {
@@ -18,8 +18,8 @@ export default function JoinPage() {
   const { player, loading: sessionLoading, signIn } = usePlayer();
 
   const [name, setName] = useState('');
-  const [university, setUniversity] = useState('');
-  const [club, setClub] = useState('');
+  const [universityValue, setUniversityValue] = useState('');
+  const [otherText, setOtherText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -31,22 +31,6 @@ export default function JoinPage() {
     intervalMs: 5_000,
   });
 
-  const { data: universities } = useLiveQuery({
-    tables: ['players'],
-    fetcher: () => (event ? fetchUniversitySuggestions(event.id) : Promise.resolve([])),
-    enabled: Boolean(event),
-    deps: [event?.id],
-    intervalMs: 10_000,
-  });
-
-  const { data: clubs } = useLiveQuery({
-    tables: ['players'],
-    fetcher: () => (event ? fetchClubSuggestions(event.id) : Promise.resolve([])),
-    enabled: Boolean(event),
-    deps: [event?.id],
-    intervalMs: 10_000,
-  });
-
   // Already have a card? Go straight where the game is.
   useEffect(() => {
     if (sessionLoading || !player || !event) return;
@@ -56,8 +40,8 @@ export default function JoinPage() {
   const validate = () => {
     const errs: Record<string, string> = {};
     if (!name.trim()) errs.name = 'Tell people what to call you.';
-    if (!university.trim()) errs.university = 'Which university are you with?';
-    if (!club.trim()) errs.club = 'Which club are you with?';
+    if (!universityValue) errs.university = 'Which university are you with?';
+    if (universityValue === 'other' && !otherText.trim()) errs.other = 'Type your university.';
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -71,8 +55,8 @@ export default function JoinPage() {
     try {
       const res = await send<{ token: string; player: StoredPlayer }>('/api/join', {
         displayName: name.trim(),
-        university: university.trim(),
-        club: club.trim(),
+        universityValue,
+        universityOtherText: universityValue === 'other' ? otherText.trim() : null,
       });
       signIn(res.player, res.token);
       markRulesSeen();
@@ -98,13 +82,13 @@ export default function JoinPage() {
   return (
     <main className="min-h-dvh flex flex-col px-5 py-8 max-w-md mx-auto w-full">
       <header className="mb-8">
-        <p className="font-mono text-xs uppercase tracking-[0.2em] text-accent">GSG Clubs</p>
+        <p className="font-mono text-xs uppercase tracking-[0.2em] text-accent">DataCamp Scholarship</p>
         <h1 className="mt-2 font-display text-[2rem] leading-[1.1] font-bold">
           Networking Bingo
         </h1>
         <p className="mt-3 text-ink-muted leading-relaxed">
           Twenty-five squares, twenty-five people to find. You cannot tick a square
-          yourself — someone has to meet you and confirm it.
+          yourself — scan someone to fill it.
         </p>
       </header>
 
@@ -141,37 +125,39 @@ export default function JoinPage() {
             )}
           </Field>
 
-          <Field
-            label="University"
-            error={fieldErrors.university}
-            hint="Pick from the list if your university is already there — it keeps the spelling consistent."
-          >
+          <Field label="University" error={fieldErrors.university}>
             {({ id, describedBy, invalid }) => (
-              <Autocomplete
+              <select
                 id={id}
-                value={university}
-                onChange={setUniversity}
-                suggestions={universities ?? []}
-                placeholder="Islamic University of Gaza"
-                describedBy={describedBy}
-                invalid={invalid}
-              />
+                value={universityValue}
+                aria-invalid={invalid || undefined}
+                aria-describedby={describedBy}
+                onChange={(e) => setUniversityValue(e.target.value)}
+                className="w-full rounded-lg bg-surface-2 border border-line-strong px-3 py-2.5 text-ink outline-none focus:border-accent aria-[invalid=true]:border-bingo"
+              >
+                <option value="" disabled>Pick your university</option>
+                {UNIVERSITIES.map((u) => (
+                  <option key={u.value} value={u.value}>{u.label}</option>
+                ))}
+              </select>
             )}
           </Field>
 
-          <Field label="Club" error={fieldErrors.club}>
-            {({ id, describedBy, invalid }) => (
-              <Autocomplete
-                id={id}
-                value={club}
-                onChange={setClub}
-                suggestions={clubs ?? []}
-                placeholder="GDSC"
-                describedBy={describedBy}
-                invalid={invalid}
-              />
-            )}
-          </Field>
+          {universityValue === 'other' && (
+            <Field label="Which university?" error={fieldErrors.other}>
+              {({ id, describedBy, invalid }) => (
+                <input
+                  id={id}
+                  value={otherText}
+                  maxLength={60}
+                  aria-invalid={invalid || undefined}
+                  aria-describedby={describedBy}
+                  onChange={(e) => setOtherText(e.target.value)}
+                  className="w-full rounded-lg bg-surface-2 border border-line-strong px-3 py-2.5 text-ink placeholder:text-ink-faint outline-none focus:border-accent aria-[invalid=true]:border-bingo"
+                />
+              )}
+            </Field>
+          )}
 
           {error && (
             <p role="alert" className="rounded-lg border border-bingo/40 bg-bingo-dim px-3 py-2.5 text-sm text-bingo-text">

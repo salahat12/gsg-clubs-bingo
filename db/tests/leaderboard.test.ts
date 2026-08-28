@@ -22,7 +22,7 @@ describe('leaderboard', () => {
 
   const board = async () => {
     const r = await db.query(
-      `select display_name, university, club, elapsed_ms, lines_completed, joined_late
+      `select display_name, university, elapsed_ms, lines_completed, joined_late
          from v_leaderboard order by elapsed_ms asc`);
     return r.rows as any[];
   };
@@ -30,7 +30,7 @@ describe('leaderboard', () => {
   const ROW = (r: number) => [0, 1, 2, 3, 4].map((c) => r * 5 + c);
 
   it('lists a player once, at their first BINGO', async () => {
-    const a = await joinPlayer(db, 'Bara', 'IUG', 'GDSC');
+    const a = await joinPlayer(db, 'Bara', { university: 'aqu' });
     await startEvent(db, 0);
 
     await winLine(a, ROW(0), 30);
@@ -44,8 +44,8 @@ describe('leaderboard', () => {
   });
 
   it('ranks by elapsed time from the event start, not by join order', async () => {
-    const slow = await joinPlayer(db, 'Slow', 'IUG', 'GDSC');
-    const fast = await joinPlayer(db, 'Fast', 'AUG', 'IEEE');
+    const slow = await joinPlayer(db, 'Slow', { university: 'aqu' });
+    const fast = await joinPlayer(db, 'Fast', { university: 'hu' });
     await startEvent(db, 0);
 
     await winLine(slow, ROW(0), 300);   // 5 minutes in
@@ -56,9 +56,9 @@ describe('leaderboard', () => {
   });
 
   it('measures a late joiner from the event start and flags them', async () => {
-    const early = await joinPlayer(db, 'Early', 'IUG', 'GDSC');
+    const early = await joinPlayer(db, 'Early', { university: 'aqu' });
     await startEvent(db, 0);
-    const late = await joinPlayer(db, 'Late', 'AUG', 'IEEE');
+    const late = await joinPlayer(db, 'Late', { university: 'hu' });
 
     expect(early.joined_late).toBe(false);
     expect(late.joined_late).toBe(true);
@@ -71,8 +71,8 @@ describe('leaderboard', () => {
   });
 
   it('drops a player the admin removed', async () => {
-    const a = await joinPlayer(db, 'Bara', 'IUG', 'GDSC');
-    const b = await joinPlayer(db, 'Sara', 'AUG', 'IEEE');
+    const a = await joinPlayer(db, 'Bara', { university: 'aqu' });
+    const b = await joinPlayer(db, 'Sara', { university: 'hu' });
     await startEvent(db, 0);
     await winLine(a, ROW(0), 30);
     await winLine(b, ROW(1), 40);
@@ -85,8 +85,8 @@ describe('leaderboard', () => {
   });
 
   it('uses later lines as the tiebreak column without reordering the first BINGO', async () => {
-    const a = await joinPlayer(db, 'A', 'IUG', 'GDSC');
-    const b = await joinPlayer(db, 'B', 'AUG', 'IEEE');
+    const a = await joinPlayer(db, 'A', { university: 'aqu' });
+    const b = await joinPlayer(db, 'B', { university: 'hu' });
     await startEvent(db, 0);
 
     await winLine(a, ROW(0), 20);

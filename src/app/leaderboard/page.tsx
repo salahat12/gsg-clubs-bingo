@@ -4,9 +4,9 @@ import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useLiveQuery } from '@/lib/live';
-import { fetchEvent, fetchLeaderboard } from '@/lib/reads';
+import { fetchEvent, fetchLeaderboard, fetchTopHelpers } from '@/lib/reads';
 import { getPlayer } from '@/lib/session';
-import { Leaderboard } from '@/components/Leaderboard';
+import { Leaderboard, TopHelpers } from '@/components/Leaderboard';
 import { Spinner, cx } from '@/components/ui';
 
 export default function PublicLeaderboardPage() {
@@ -35,6 +35,14 @@ function Board() {
     intervalMs: display ? 4_000 : undefined,
   });
 
+  const { data: helpers } = useLiveQuery({
+    tables: ['card_squares'],
+    fetcher: () => (event ? fetchTopHelpers(event.id) : Promise.resolve([])),
+    enabled: Boolean(event),
+    deps: [event?.id],
+    intervalMs: display ? 4_000 : undefined,
+  });
+
   /**
    * Projector mode: large type, no chrome, nothing interactive. Meant to
    * be thrown on a screen at the venue and left alone.
@@ -48,8 +56,9 @@ function Board() {
           </p>
           <h1 className="mt-2 font-display text-6xl font-bold">Leaderboard</h1>
         </header>
-        <div className="mx-auto max-w-5xl">
+        <div className="mx-auto grid max-w-5xl grid-cols-1 gap-10 lg:grid-cols-[1.4fr_1fr]">
           <Leaderboard rows={rows ?? []} display />
+          <TopHelpers rows={helpers ?? []} display />
         </div>
       </main>
     );
@@ -58,7 +67,7 @@ function Board() {
   return (
     <main className="mx-auto min-h-dvh w-full max-w-lg px-4 py-8">
       <header>
-        <p className="font-mono text-xs uppercase tracking-[0.2em] text-accent">GSG Clubs</p>
+        <p className="font-mono text-xs uppercase tracking-[0.2em] text-accent">DataCamp Scholarship</p>
         <h1 className="mt-1.5 font-display text-2xl font-bold">Leaderboard</h1>
         <p className="mt-1 text-sm text-ink-muted">
           {event?.status === 'ended'
@@ -76,6 +85,12 @@ function Board() {
           <Leaderboard rows={rows ?? []} meId={meId} />
         )}
       </div>
+
+      {helpers && helpers.length > 0 && (
+        <div className="mt-8">
+          <TopHelpers rows={helpers} />
+        </div>
+      )}
 
       <div className={cx('mt-8 flex justify-center gap-4 text-sm')}>
         <Link href="/leaderboard?display=1" className="text-accent underline underline-offset-4">

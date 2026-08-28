@@ -2,33 +2,34 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { ApiError, QueuedError, send } from '@/lib/mutate';
 import { newClientKey } from '@/lib/session';
 import { Button, Sheet, cx, relativeTime } from './ui';
-import type { BoardPost, CardSquare, PendingConfirmation } from '@/lib/types';
+import type { BoardPost, CardSquare } from '@/lib/types';
 
 /**
  * What happens when you tap a square.
  *
- * The two actions are the whole matchmaking model:
- *   Request — "I need to find a person who matches this"
- *   Offer   — "this describes me, come and find me"
- * Both land on the same board; they are two sides of the same need.
+ * A square fills only one way now: scan the person, or type their code.
+ * The board is a separate, purely optional finding tool — post here if
+ * you cannot think of anyone in the room who matches, then go meet
+ * whoever replies and scan them.
  */
 export function SquareSheet({
-  square, existingPost, pending, onClose, onPosted, onCancelMatch, locked,
+  square, existingPost, onClose, onPosted, locked,
 }: {
   square: CardSquare | null;
   existingPost?: BoardPost | null;
-  pending?: PendingConfirmation | null;
   onClose: () => void;
   onPosted: (kind: 'request' | 'offer', postId: string) => void;
-  onCancelMatch: (confirmationId: string) => Promise<void>;
   locked?: boolean;
 }) {
-  const [busy, setBusy] = useState<'request' | 'offer' | 'cancel' | null>(null);
+  const router = useRouter();
+  const [busy, setBusy] = useState<'request' | 'offer' | null>(null);
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [showAsk, setShowAsk] = useState(false);
 
   if (!square) return null;
 
@@ -54,32 +55,27 @@ export function SquareSheet({
     }
   };
 
-  const title =
-    square.status === 'filled' ? 'Filled' : square.status === 'pending' ? 'Waiting on a confirmation' : 'This square';
+  const title = square.status === 'filled' ? 'Filled' : 'This square';
 
   return (
     <Sheet open onClose={onClose} title={title}>
       <div className="space-y-5">
         <p className="font-display text-xl font-semibold leading-snug">{square.criterion_text}</p>
 
-        {square.criterion_rule !== 'honor' && (
+        {square.criterion_rule === 'diff_university' && (
           <p className="rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-sm text-ink-muted">
-            {square.criterion_rule === 'diff_university'
-              ? 'The app checks this one: your match must be from a different university.'
-              : 'The app checks this one: your match must be from a different club.'}
+            The app checks this one: your match must be from a different university.
           </p>
         )}
 
         {square.status === 'filled' && (
           <div className="rounded-lg border border-confirmed/50 bg-confirmed-dim px-4 py-3">
-            <p className="text-sm text-ink-muted">Confirmed by</p>
+            <p className="text-sm text-ink-muted">Filled by</p>
             <p className="mt-0.5 font-display text-lg font-semibold text-ink">
               {square.filled_by_name ?? 'A player who has since left'}
             </p>
             {square.filled_by_university && (
-              <p className="text-sm text-ink-muted">
-                {square.filled_by_university} · {square.filled_by_club}
-              </p>
+              <p className="text-sm text-ink-muted">{square.filled_by_university}</p>
             )}
             {square.filled_at && (
               <p className="mt-2 font-mono text-xs text-ink-faint">{relativeTime(square.filled_at)}</p>
@@ -87,32 +83,15 @@ export function SquareSheet({
           </div>
         )}
 
-        {square.status === 'pending' && pending && (
-          <div className="space-y-3">
-            <div className="rounded-lg border border-accent/50 bg-accent-dim/25 px-4 py-3">
-              <p className="text-sm text-ink-muted">Waiting for</p>
-              <p className="mt-0.5 font-display text-lg font-semibold">{pending.confirmer_name}</p>
-              <p className="mt-1 text-sm text-ink-muted">
-                They need to tap Confirm on their phone. Give them a nudge.
-              </p>
-            </div>
-            <Button
-              variant="secondary"
-              size="lg"
-              busy={busy === 'cancel'}
-              onClick={async () => {
-                setBusy('cancel');
-                try { await onCancelMatch(pending.id); onClose(); }
-                finally { setBusy(null); }
-              }}
-            >
-              Cancel and free the square
-            </Button>
-          </div>
-        )}
-
         {square.status === 'empty' && !locked && (
           <>
+            <Button
+              size="lg"
+              onClick={() => router.push(`/play/scan?square=${square.id}`)}
+            >
+              Scan to fill
+            </Button>
+
             {existingPost ? (
               <div className="rounded-lg border border-line-strong bg-surface-2 px-4 py-3">
                 <p className="text-sm text-ink-muted">
@@ -122,6 +101,14 @@ export function SquareSheet({
                   <Button variant="secondary">Open the thread</Button>
                 </Link>
               </div>
+            ) : !showAsk ? (
+              <button
+                type="button"
+                onClick={() => setShowAsk(true)}
+                className="w-full text-center text-sm text-ink-muted underline underline-offset-4 hover:text-ink"
+              >
+                Can&rsquo;t think of anyone? Ask the board
+              </button>
             ) : (
               <>
                 <div>
@@ -139,7 +126,7 @@ export function SquareSheet({
                 </div>
 
                 <div className="space-y-2">
-                  <Button size="lg" busy={busy === 'request'} onClick={() => post('request')}>
+                  <Button variant="secondary" size="lg" busy={busy === 'request'} onClick={() => post('request')}>
                     Ask for help finding someone
                   </Button>
                   <Button variant="secondary" size="lg" busy={busy === 'offer'} onClick={() => post('offer')}>
@@ -148,9 +135,8 @@ export function SquareSheet({
                 </div>
 
                 <p className="text-xs leading-relaxed text-ink-muted">
-                  <strong className="text-ink">Ask</strong> puts it on the board so people can come to you.{' '}
-                  <strong className="text-ink">Offer</strong> tells the room this square describes you, so
-                  anyone who needs it can find you.
+                  The board is just for finding someone — posting or replying does not fill
+                  anything by itself. Once you find the right person, go meet them and scan.
                 </p>
               </>
             )}

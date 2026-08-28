@@ -16,22 +16,28 @@
 -- at the venue, not scraping.
 -- =====================================================================
 
-alter table events              enable row level security;
-alter table criteria            enable row level security;
-alter table players             enable row level security;
-alter table cards               enable row level security;
-alter table card_squares        enable row level security;
-alter table posts               enable row level security;
-alter table replies             enable row level security;
-alter table match_confirmations enable row level security;
-alter table pair_matches        enable row level security;
-alter table bingos              enable row level security;
-alter table rate_events         enable row level security;
+alter table events        enable row level security;
+alter table universities  enable row level security;
+alter table criteria      enable row level security;
+alter table players       enable row level security;
+alter table cards         enable row level security;
+alter table card_squares  enable row level security;
+alter table posts         enable row level security;
+alter table replies       enable row level security;
+alter table pair_matches  enable row level security;
+alter table bingos        enable row level security;
+alter table rate_events   enable row level security;
+alter table fill_events   enable row level security;
 
 -- ---------------------------------------------------------------------
 -- Read policies. Explicit, one per table, all SELECT-only.
 -- ---------------------------------------------------------------------
 create policy events_public_read on events
+  for select to anon, authenticated using (true);
+
+-- The join form's dropdown reads this directly; it's a fixed lookup, not
+-- sensitive, and stable `value`s are what the client submits to rpc_join.
+create policy universities_public_read on universities
   for select to anon, authenticated using (true);
 
 create policy criteria_public_read on criteria
@@ -54,14 +60,13 @@ create policy posts_public_read on posts
 create policy replies_public_read on replies
   for select to anon, authenticated using (hidden_at is null);
 
-create policy match_confirmations_public_read on match_confirmations
-  for select to anon, authenticated using (true);
-
 create policy bingos_public_read on bingos
   for select to anon, authenticated using (true);
 
--- pair_matches and rate_events get RLS with NO policy at all: deny by
--- default. They are internal bookkeeping and no client needs them.
+-- pair_matches, rate_events and fill_events get RLS with NO policy at
+-- all: deny by default. They are internal bookkeeping and no client
+-- needs them — fill_events in particular is just the idempotency ledger,
+-- read only by the service role inside rpc_scan_fill itself.
 
 -- ---------------------------------------------------------------------
 -- Grants. Start from nothing and hand back only SELECT.
@@ -71,19 +76,24 @@ grant usage on schema public to anon, authenticated;
 revoke all on all tables in schema public from anon, authenticated;
 
 grant select on
-  events, criteria, players, cards, card_squares, posts, replies,
-  match_confirmations, bingos
+  events, universities, criteria, players, cards, card_squares, posts, replies, bingos
 to anon, authenticated;
 
 grant select on
   v_lobby_players, v_lobby_clusters, v_board_posts, v_board_replies,
-  v_leaderboard, v_card_squares, v_pending_confirmations, v_event_stats, v_clubs
+  v_leaderboard, v_top_helpers, v_card_squares, v_fill_feed, v_event_stats
 to anon, authenticated;
 
 -- ---------------------------------------------------------------------
 -- The important one: no client may call the rules engine directly.
 -- ---------------------------------------------------------------------
 revoke execute on all functions in schema public from anon, authenticated, public;
+
+-- The one deliberate exception: a pure read-only label lookup that the
+-- read-model views above call. It exposes nothing anon couldn't already
+-- read directly off `players`/`universities` — it is not part of the
+-- rules engine.
+grant execute on function university_label(uuid) to anon, authenticated;
 
 grant execute on all functions in schema public to service_role;
 grant all on all tables in schema public to service_role;
@@ -103,7 +113,6 @@ begin
     alter publication supabase_realtime add table posts;
     alter publication supabase_realtime add table replies;
     alter publication supabase_realtime add table card_squares;
-    alter publication supabase_realtime add table match_confirmations;
     alter publication supabase_realtime add table bingos;
   end if;
 end $$;

@@ -9,7 +9,7 @@ export const POST = handler(async (req) => {
     z.object({
       criterionId: z.string().uuid(),
       text: z.string().trim().min(1).max(300).optional(),
-      rule: z.enum(['honor', 'diff_university', 'diff_club_entity']).optional(),
+      rule: z.enum(['honor', 'diff_university']).optional(),
     }),
   );
 

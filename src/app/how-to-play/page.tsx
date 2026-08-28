@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { RulesCard } from '@/components/RulesCard';
 
-export const metadata = { title: 'How to play · GSG Clubs Networking Bingo' };
+export const metadata = { title: 'How to play · Networking Bingo' };
 
 export default function HowToPlayPage() {
   return (

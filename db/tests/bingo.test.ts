@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import type { PGlite } from '@electric-sql/pglite';
 import {
-  freshDb, resetGame, joinPlayer, startEvent, call, squareByIdx, forceFill, fullMatch,
+  freshDb, resetGame, joinPlayer, startEvent, call, squareByIdx, forceFill, scanFill,
   type Player,
 } from './harness';
 
@@ -41,8 +41,8 @@ describe('BINGO line detection', () => {
 
   beforeEach(async () => {
     await resetGame(db);
-    me = await joinPlayer(db, 'Bara', 'IUG', 'GDSC');
-    other = await joinPlayer(db, 'Sara', 'AUG', 'IEEE');
+    me = await joinPlayer(db, 'Bara', { university: 'aqu' });
+    other = await joinPlayer(db, 'Sara', { university: 'hu' });
     await startEvent(db, 0);
   });
 
@@ -143,7 +143,7 @@ describe('BINGO line detection', () => {
     });
   });
 
-  it('a real confirmed match completing a line records the BINGO through the RPC', async () => {
+  it('a real scan completing a line records the BINGO through the RPC', async () => {
     // fill four squares of row 0 directly, then win the fifth for real
     const row0 = ROWS[0];
     await fill(row0.slice(0, 4));
@@ -153,8 +153,8 @@ describe('BINGO line detection', () => {
       `select position from criteria where id = $1`, [lastSquare.criterion_id],
     );
 
-    const result = await fullMatch(db, me, other, pos.rows[0].position);
-    expect((result as any).result).toBe('confirmed');
+    const result = await scanFill(db, me, other, pos.rows[0].position);
+    expect((result as any).result).toBe('filled');
     expect((result as any).new_lines).toEqual(['row:0']);
 
     const b = await db.query<{ n: number }>(

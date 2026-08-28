@@ -10,16 +10,19 @@
 -- on every reload and every device.
 -- ---------------------------------------------------------------------
 create or replace function rpc_join(
-  p_event_slug   text,
-  p_display_name text,
-  p_university   text,
-  p_club         text
+  p_event_slug            text,
+  p_display_name          text,
+  p_university_value      text,
+  p_university_other_text text
 ) returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   e             events%rowtype;
-  v_player_id   uuid;
+  u             universities%rowtype;
+  v_player_id   uuid := gen_random_uuid();
   v_card_id     uuid;
   v_active      int;
+  v_group       text;
+  v_other_text  text;
 begin
   select * into e from events where slug = p_event_slug;
   if not found then
@@ -33,6 +36,24 @@ begin
       using errcode = 'GB104';
   end if;
 
+  select * into u from universities where value = p_university_value;
+  if not found then
+    raise exception 'Pick a university from the list.' using errcode = 'GB403';
+  end if;
+
+  if p_university_value = 'other' then
+    v_other_text := nullif(btrim(coalesce(p_university_other_text, '')), '');
+    if v_other_text is null then
+      raise exception 'Type your university.' using errcode = 'GB403';
+    end if;
+    -- Each 'Other' is its own university for matching purposes: a unique
+    -- group per player, so they match with everyone including each other.
+    v_group := 'other-' || v_player_id::text;
+  else
+    v_other_text := null;
+    v_group := u.group_key;
+  end if;
+
   -- A 5x5 card needs exactly 25 criteria. If an organiser has broken the
   -- pool mid-event, fail loudly here rather than deal a malformed card.
   select count(*) into v_active from criteria where event_id = e.id and active;
@@ -41,9 +62,12 @@ begin
       using errcode = 'GB402';
   end if;
 
-  insert into players (event_id, display_name, university, club, joined_late)
-  values (e.id, btrim(p_display_name), btrim(p_university), btrim(p_club), e.status <> 'waiting')
-  returning id into v_player_id;
+  insert into players
+    (id, event_id, display_name, university_value, university_other_text,
+     university_group, joined_late)
+  values
+    (v_player_id, e.id, btrim(p_display_name), p_university_value, v_other_text,
+     v_group, e.status <> 'waiting');
 
   insert into cards (event_id, player_id) values (e.id, v_player_id) returning id into v_card_id;
 
@@ -168,70 +192,3 @@ begin
   return jsonb_build_object('post_id', p_post_id, 'status', 'closed');
 end $$;
 
--- ---------------------------------------------------------------------
--- Ask someone to vouch for you. The caller is always the player whose
--- square will fill — on a Request post that is the author, on an Offer
--- post that is the replier. The other person always gets the prompt.
--- ---------------------------------------------------------------------
-create or replace function rpc_request_match(
-  p_requester_id uuid,
-  p_confirmer_id uuid,
-  p_square_id    uuid,
-  p_post_id      uuid
-) returns jsonb language plpgsql security definer set search_path = public as $$
-declare
-  req      players%rowtype;
-  conf     players%rowtype;
-  sq       card_squares%rowtype;
-  v_used   int;
-  v_id     uuid;
-begin
-  req := get_live_player(p_requester_id);
-  perform assert_playable(req.event_id);
-
-  if p_requester_id = p_confirmer_id then
-    raise exception 'You cannot mark yourself as your own match.' using errcode = 'GB300';
-  end if;
-
-  conf := get_live_player(p_confirmer_id);
-  if conf.event_id <> req.event_id then
-    raise exception 'That player is not in this event.' using errcode = 'GB401';
-  end if;
-
-  select s.* into sq
-  from card_squares s join cards c on c.id = s.card_id
-  where s.id = p_square_id and c.player_id = p_requester_id
-  for update;
-  if not found then
-    raise exception 'That square is not on your card.' using errcode = 'GB403';
-  end if;
-  if sq.status = 'filled' then
-    raise exception 'That square is already filled.' using errcode = 'GB304';
-  end if;
-  if sq.status = 'pending' then
-    raise exception 'You already have a match waiting on that square.' using errcode = 'GB403';
-  end if;
-
-  -- Fail fast on the pair cap so the player finds out before walking
-  -- across the room; it is checked again atomically on confirmation.
-  v_used := pair_used(req.event_id, p_requester_id, p_confirmer_id);
-  if v_used >= 2 then
-    raise exception 'You two have already matched twice. Find someone new for this one.'
-      using errcode = 'GB301';
-  end if;
-
-  -- Reject impossible matches now rather than after they have both
-  -- walked over and tapped confirm.
-  perform assert_criterion_rule(sq.criterion_id, p_requester_id, p_confirmer_id);
-
-  perform assert_rate(p_requester_id, 'match_request', 30, interval '1 minute');
-
-  insert into match_confirmations
-    (event_id, post_id, requester_id, confirmer_id, criterion_id, requester_square_id)
-  values (req.event_id, p_post_id, p_requester_id, p_confirmer_id, sq.criterion_id, sq.id)
-  returning id into v_id;
-
-  update card_squares set status = 'pending' where id = sq.id;
-
-  return jsonb_build_object('confirmation_id', v_id);
-end $$;

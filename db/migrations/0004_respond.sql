@@ -1,186 +1,110 @@
 -- =====================================================================
--- 0004_respond.sql — rpc_respond_match
+-- 0004_respond.sql — rpc_scan_fill
 --
--- The function that decides the game. It runs as one transaction and
--- takes row locks in a fixed order (confirmation -> square -> pair) so
--- concurrent confirmations serialise instead of interleaving.
+-- The function that decides the game, now triggered by a scan instead of
+-- a two-step approval. It runs as one transaction and takes row locks in
+-- a fixed order (square -> pair) so concurrent fills serialise instead of
+-- interleaving.
+--
+-- Identity of the scanned player is NEVER taken as a bare parameter from
+-- the client here — the caller (a Next.js route holding SCAN_TOKEN_SECRET)
+-- verifies the rotating scan token/code first and passes in the player id
+-- it already proved out of that signature. This function trusts that id
+-- exactly as much as it trusts p_scanning_player_id: both are the output
+-- of server-side auth, never a raw request-body field. Token verification
+-- itself lives in src/lib/scanToken.ts, mirroring how a player's own
+-- session token is verified in src/lib/route.ts rather than in SQL — auth
+-- lives in the route layer, game rules live here.
 --
 -- What it guarantees:
---   * a square is never self-marked (confirmer <> requester, twice over)
+--   * a square is never self-filled (scanning player <> scanned player)
 --   * a square already filled cannot be filled again
---   * criteria 1 and 22 are re-validated at confirmation time, not just
---     at request time, because a player can edit nothing but an admin can
---   * the pair cap holds even if two confirmations land simultaneously
+--   * criteria 4 and 7 are re-validated here, not just trusted from the UI
+--   * the pair cap holds even if two fills land simultaneously
 --   * BINGO is detected server-side, timestamped server-side
+--   * a retried request (client_key) replays its stored result instead of
+--     erroring on "already filled" or consuming a second pair-cap slot
 -- =====================================================================
 
-create or replace function rpc_respond_match(
-  p_confirmation_id     uuid,
-  p_confirmer_id        uuid,
-  p_action              text,
-  p_reciprocal_square_id uuid default null
+create or replace function rpc_scan_fill(
+  p_scanning_player_id uuid,
+  p_square_id           uuid,
+  p_scanned_player_id   uuid,
+  p_client_key          text
 ) returns jsonb language plpgsql security definer set search_path = public as $$
 declare
-  mc            match_confirmations%rowtype;
-  sq            card_squares%rowtype;
-  rsq           card_squares%rowtype;
-  req           players%rowtype;
-  conf          players%rowtype;
-  v_used        int;
-  v_want        int;
-  v_new_lines   text[] := '{}';
-  v_recip_lines text[] := '{}';
-  v_recip_id    uuid;
-  v_recip_done  boolean := false;
-  v_recip_note  text := null;
+  scanning    players%rowtype;
+  scanned     players%rowtype;
+  sq          card_squares%rowtype;
+  v_existing  fill_events%rowtype;
+  v_used      int;
+  v_new_lines text[] := '{}';
+  v_uni       text;
+  v_result    jsonb;
 begin
-  select * into mc from match_confirmations where id = p_confirmation_id for update;
+  select * into v_existing from fill_events
+   where square_id = p_square_id and client_key = p_client_key;
+  if found then
+    return v_existing.result;
+  end if;
+
+  scanning := get_live_player(p_scanning_player_id);
+  perform assert_playable(scanning.event_id);
+  perform assert_rate(p_scanning_player_id, 'scan_fill', 30, interval '1 minute');
+
+  if p_scanning_player_id = p_scanned_player_id then
+    raise exception 'You cannot scan your own code.' using errcode = 'GB300';
+  end if;
+
+  scanned := get_live_player(p_scanned_player_id);
+  if scanned.event_id <> scanning.event_id then
+    raise exception 'That player is not in this event.' using errcode = 'GB401';
+  end if;
+
+  select s.* into sq
+  from card_squares s join cards c on c.id = s.card_id
+  where s.id = p_square_id and c.player_id = p_scanning_player_id
+  for update;
   if not found then
-    raise exception 'That match request no longer exists.' using errcode = 'GB401';
+    raise exception 'That square is not on your card.' using errcode = 'GB403';
   end if;
-  if mc.confirmer_id <> p_confirmer_id then
-    raise exception 'That confirmation was not sent to you.' using errcode = 'GB305';
-  end if;
-  if mc.status <> 'pending' then
-    raise exception 'You have already answered this one.' using errcode = 'GB306';
-  end if;
-
-  perform assert_playable(mc.event_id);
-
-  -- ---------------- decline ----------------
-  if p_action = 'decline' then
-    update match_confirmations
-       set status = 'declined', responded_at = now()
-     where id = mc.id;
-    update card_squares set status = 'empty'
-     where id = mc.requester_square_id and status = 'pending';
-    -- put the post back on the board so they can find someone else
-    update posts set status = 'open', closed_at = null
-     where id = mc.post_id and status = 'closed';
-    return jsonb_build_object('result', 'declined');
-  end if;
-
-  if p_action <> 'confirm' then
-    raise exception 'Unknown action.' using errcode = 'GB403';
-  end if;
-
-  -- ---------------- confirm ----------------
-  req  := get_live_player(mc.requester_id);
-  conf := get_live_player(mc.confirmer_id);
-
-  -- belt and braces: the CHECK constraint already forbids this, but the
-  -- rule is important enough to state twice
-  if req.id = conf.id then
-    raise exception 'You cannot mark yourself as your own match.' using errcode = 'GB300';
-  end if;
-
-  select * into sq from card_squares where id = mc.requester_square_id for update;
   if sq.status = 'filled' then
-    raise exception 'That square was already filled by someone else.' using errcode = 'GB304';
+    raise exception 'You have already filled that square.' using errcode = 'GB304';
   end if;
 
-  perform assert_criterion_rule(mc.criterion_id, req.id, conf.id);
-
-  -- Pair budget. We want 1 for the main match, 2 if they are also
-  -- filling one of their own. If only the reciprocal would overflow, we
-  -- still complete the main match and explain why the extra was skipped.
-  v_used := pair_used(mc.event_id, req.id, conf.id);
-  v_want := case when p_reciprocal_square_id is not null then 2 else 1 end;
-
-  if v_used + 1 > 2 then
-    raise exception 'You two have already matched twice. Each pair can fill at most 2 squares.'
+  v_used := pair_used(scanning.event_id, p_scanning_player_id, p_scanned_player_id);
+  if v_used >= 2 then
+    raise exception 'You have already matched with % twice.', scanned.display_name
       using errcode = 'GB301';
   end if;
-  if v_used + v_want > 2 then
-    v_recip_note := 'Your own square was not filled — you two have used both of your shared matches.';
-    p_reciprocal_square_id := null;
-  end if;
+
+  perform assert_criterion_rule(sq.criterion_id, p_scanning_player_id, p_scanned_player_id);
+
+  v_uni := university_label(p_scanned_player_id);
 
   update card_squares
-     set status = 'filled', filled_by_player_id = conf.id, filled_at = now()
+     set status = 'filled',
+         filled_by_player_id = scanned.id,
+         filled_by_name       = scanned.display_name,
+         filled_by_university = v_uni,
+         filled_at            = now()
    where id = sq.id;
 
-  update match_confirmations set status = 'confirmed', responded_at = now() where id = mc.id;
+  perform pair_consume(scanning.event_id, p_scanning_player_id, p_scanned_player_id, 1);
 
-  update posts set status = 'closed', closed_at = now()
-   where id = mc.post_id and status = 'open';
+  v_new_lines := record_bingos(p_scanning_player_id);
 
-  perform pair_consume(mc.event_id, req.id, conf.id, 1);
-
-  v_new_lines := record_bingos(req.id);
-
-  -- ---------------- optional reciprocal fill ----------------
-  -- They just met in person, so the confirmer may fill one of their own
-  -- squares in the same breath. They choose which one; nothing is
-  -- auto-filled, and it still passes every rule check and the pair cap.
-  if p_reciprocal_square_id is not null then
-    select s.* into rsq
-    from card_squares s join cards c on c.id = s.card_id
-    where s.id = p_reciprocal_square_id and c.player_id = conf.id
-    for update;
-
-    if not found then
-      raise exception 'That square is not on your card.' using errcode = 'GB403';
-    end if;
-    if rsq.status = 'filled' then
-      raise exception 'You have already filled that square.' using errcode = 'GB304';
-    end if;
-
-    -- roles reverse here: the confirmer is now the one being vouched for
-    perform assert_criterion_rule(rsq.criterion_id, conf.id, req.id);
-
-    insert into match_confirmations
-      (event_id, post_id, requester_id, confirmer_id, criterion_id,
-       requester_square_id, status, reciprocal_of, responded_at)
-    values
-      (mc.event_id, mc.post_id, conf.id, req.id, rsq.criterion_id,
-       rsq.id, 'confirmed', mc.id, now())
-    returning id into v_recip_id;
-
-    update card_squares
-       set status = 'filled', filled_by_player_id = req.id, filled_at = now()
-     where id = rsq.id;
-
-    perform pair_consume(mc.event_id, req.id, conf.id, 1);
-
-    v_recip_lines := record_bingos(conf.id);
-    v_recip_done  := true;
-  end if;
-
-  return jsonb_build_object(
-    'result',             'confirmed',
-    'square_id',          sq.id,
-    'requester_id',       req.id,
-    'requester_name',     req.display_name,
-    'confirmer_name',     conf.display_name,
-    'new_lines',          to_jsonb(v_new_lines),
-    'reciprocal_filled',  v_recip_done,
-    'reciprocal_id',      v_recip_id,
-    'reciprocal_lines',   to_jsonb(v_recip_lines),
-    'note',               v_recip_note
+  v_result := jsonb_build_object(
+    'result',        'filled',
+    'square_id',     sq.id,
+    'scanned_id',    scanned.id,
+    'scanned_name',  scanned.display_name,
+    'scanned_university', v_uni,
+    'new_lines',     to_jsonb(v_new_lines)
   );
-end $$;
 
--- Let the requester take back a pending ask (they found someone else, or
--- the other person wandered off).
-create or replace function rpc_cancel_match(p_confirmation_id uuid, p_requester_id uuid)
-returns jsonb language plpgsql security definer set search_path = public as $$
-declare mc match_confirmations%rowtype;
-begin
-  select * into mc from match_confirmations where id = p_confirmation_id for update;
-  if not found then
-    raise exception 'That match request no longer exists.' using errcode = 'GB401';
-  end if;
-  if mc.requester_id <> p_requester_id then
-    raise exception 'Only the person who asked can cancel this.' using errcode = 'GB305';
-  end if;
-  if mc.status <> 'pending' then
-    raise exception 'That request has already been answered.' using errcode = 'GB306';
-  end if;
+  insert into fill_events (square_id, player_id, client_key, result)
+  values (p_square_id, p_scanning_player_id, p_client_key, v_result);
 
-  update match_confirmations set status = 'cancelled', responded_at = now() where id = mc.id;
-  update card_squares set status = 'empty'
-   where id = mc.requester_square_id and status = 'pending';
-
-  return jsonb_build_object('result', 'cancelled');
+  return v_result;
 end $$;

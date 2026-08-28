@@ -85,3 +85,11 @@ export const clientKey = z.string().min(8).max(100);
 export function tokenSecret(): string {
   return secret();
 }
+
+/** Separate secret for scan tokens — a narrower blast radius than the
+ *  player session secret if one is ever compromised. */
+export function scanTokenSecret(): string {
+  const s = process.env.SCAN_TOKEN_SECRET;
+  if (!s) throw new Error('SCAN_TOKEN_SECRET is not set');
+  return s;
+}

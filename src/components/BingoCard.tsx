@@ -196,13 +196,8 @@ function describe(sq: CardSquare): string {
   const row = Math.floor(sq.idx / GRID) + 1;
   const col = (sq.idx % GRID) + 1;
   const where = `Row ${row}, column ${col}, ${HEADERS[sq.idx % GRID]}.`;
-  const state =
-    sq.status === 'filled'
-      ? `Filled by ${sq.filled_by_name ?? 'someone who has since left'}.`
-      : sq.status === 'pending'
-        ? 'Waiting for someone to confirm.'
-        : 'Empty.';
-  const action = sq.status === 'empty' ? 'Activate to ask for help or offer help.' : 'Activate for details.';
+  const state = sq.status === 'filled' ? `Filled by ${sq.filled_by_name ?? 'someone who has since left'}.` : 'Empty.';
+  const action = sq.status === 'empty' ? 'Activate to scan someone or post to the board.' : 'Activate for details.';
   return `${where} ${sq.criterion_text}. ${state} ${action}`;
 }
 
@@ -250,9 +245,7 @@ function Tile({
           ? 'border-bingo bg-bingo-dim'
           : square.status === 'filled'
             ? 'border-confirmed/60 bg-confirmed-dim'
-            : square.status === 'pending'
-              ? 'border-accent/70 bg-accent-dim/25'
-              : 'border-line bg-surface-2 hover:border-line-strong hover:bg-surface-3',
+            : 'border-line bg-surface-2 hover:border-line-strong hover:bg-surface-3',
       )}
     >
       {inLine && <span aria-hidden className="absolute inset-0 line-sweep pointer-events-none" />}
@@ -269,7 +262,7 @@ function Tile({
         )}
         style={{ fontSize: 11 }}
       >
-        {square.criterion_text}
+        {square.status === 'filled' && square.filled_by_name ? square.filled_by_name : square.criterion_text}
       </span>
 
       {square.status === 'filled' && (
@@ -284,10 +277,6 @@ function Tile({
             <path d="M2.5 6.2l2.4 2.4L9.5 4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </span>
-      )}
-
-      {square.status === 'pending' && (
-        <span aria-hidden className="absolute bottom-1 right-1 size-2 rounded-full bg-accent animate-twinkle" />
       )}
     </button>
   );
@@ -308,9 +297,7 @@ function ListRow({
             ? 'border-bingo bg-bingo-dim'
             : square.status === 'filled'
               ? 'border-confirmed/50 bg-confirmed-dim'
-              : square.status === 'pending'
-                ? 'border-accent/60 bg-accent-dim/20'
-                : 'border-line bg-surface-2',
+              : 'border-line bg-surface-2',
         )}
       >
         <span
@@ -329,11 +316,8 @@ function ListRow({
           </span>
           {square.status === 'filled' && square.filled_by_name && (
             <span className="mt-0.5 block text-xs text-confirmed">
-              Confirmed by {square.filled_by_name}
+              Filled by {square.filled_by_name}
             </span>
-          )}
-          {square.status === 'pending' && (
-            <span className="mt-0.5 block text-xs text-accent">Waiting for a confirmation</span>
           )}
         </span>
       </button>

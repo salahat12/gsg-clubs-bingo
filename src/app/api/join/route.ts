@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { EVENT_SLUG } from '@/lib/config';
+import { EVENT_SLUG, UNIVERSITIES } from '@/lib/config';
 import { signPlayerToken } from '@/lib/token';
 import { body, handler, ok, rpc, shortText, tokenSecret } from '@/lib/route';
 
@@ -15,16 +15,16 @@ export const POST = handler(async (req) => {
     req,
     z.object({
       displayName: shortText('Your name'),
-      university: shortText('University'),
-      club: shortText('Club'),
+      universityValue: shortText('University'),
+      universityOtherText: z.string().trim().max(60).nullable().optional(),
     }),
   );
 
   const data = await rpc<JoinResult>('rpc_join', {
     p_event_slug: EVENT_SLUG,
     p_display_name: input.displayName,
-    p_university: input.university,
-    p_club: input.club,
+    p_university_value: input.universityValue,
+    p_university_other_text: input.universityValue === 'other' ? (input.universityOtherText ?? null) : null,
   });
 
   // The card lives server-side; this token is only the claim to it, so a
@@ -34,6 +34,11 @@ export const POST = handler(async (req) => {
     tokenSecret(),
   );
 
+  const university =
+    input.universityValue === 'other'
+      ? (input.universityOtherText ?? 'Other')
+      : (UNIVERSITIES.find((u) => u.value === input.universityValue)?.label ?? input.universityValue);
+
   return ok({
     token,
     player: {
@@ -41,8 +46,8 @@ export const POST = handler(async (req) => {
       cardId: data.card_id,
       eventId: data.event_id,
       displayName: input.displayName,
-      university: input.university,
-      club: input.club,
+      universityValue: input.universityValue,
+      university,
       joinedLate: data.joined_late,
     },
   });

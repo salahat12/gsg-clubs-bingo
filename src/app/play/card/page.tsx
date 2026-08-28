@@ -1,12 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { usePlayer } from '@/lib/player';
 import { useLive, useLiveQuery } from '@/lib/live';
-import { fetchBoard, fetchCard, fetchEvent, fetchMyBingos, fetchOutbox } from '@/lib/reads';
+import { fetchBoard, fetchCard, fetchEvent, fetchMyBingos } from '@/lib/reads';
 import { closestLine } from '@/lib/bingo';
-import { send } from '@/lib/mutate';
 import { BingoCard } from '@/components/BingoCard';
 import { SquareSheet } from '@/components/SquareSheet';
 import { BingoCelebration, lineLabel } from '@/components/BingoCelebration';
@@ -27,16 +27,9 @@ export default function CardPage() {
 
   const { data: event } = useLiveQuery({ tables: ['events'], fetcher: fetchEvent });
 
-  const { data: squares, loading, refetch: refetchCard } = useLiveQuery({
+  const { data: squares, loading } = useLiveQuery({
     tables: ['card_squares'],
     fetcher: () => (player ? fetchCard(player.id) : Promise.resolve([])),
-    enabled: Boolean(player),
-    deps: [player?.id],
-  });
-
-  const { data: outbox, refetch: refetchOutbox } = useLiveQuery({
-    tables: ['match_confirmations'],
-    fetcher: () => (player ? fetchOutbox(player.id) : Promise.resolve([])),
     enabled: Boolean(player),
     deps: [player?.id],
   });
@@ -76,12 +69,6 @@ export default function CardPage() {
 
   const locked = event?.status !== 'running';
 
-  const pendingFor = useMemo(() => {
-    const map = new Map<string, (typeof outbox extends (infer U)[] | null ? U : never)>();
-    for (const c of outbox ?? []) map.set(c.requester_square_id, c);
-    return map;
-  }, [outbox]);
-
   const postFor = useMemo(() => {
     const map = new Map<string, NonNullable<typeof myPosts>[number]>();
     for (const p of myPosts ?? []) {
@@ -100,16 +87,6 @@ export default function CardPage() {
 
   const nearest = useMemo(() => closestLine(filled), [filled]);
   const filledCount = filled.filter(Boolean).length;
-
-  const cancelMatch = useCallback(
-    async (confirmationId: string) => {
-      await send(`/api/match/${confirmationId}/cancel`, {});
-      refetchCard();
-      refetchOutbox();
-      toast.show('Cancelled. That square is open again.');
-    },
-    [refetchCard, refetchOutbox, toast],
-  );
 
   const elapsed =
     event?.started_at && event.status !== 'waiting'
@@ -160,7 +137,7 @@ export default function CardPage() {
       <BingoCard squares={squares ?? []} onOpen={setOpenSquare} locked={locked && event?.status === 'ended'} />
 
       <p className="mt-4 px-1 text-center text-xs text-ink-muted">
-        A square only fills when the other person confirms it.{' '}
+        A square only fills when you scan someone.{' '}
         <button onClick={() => setShowRules(true)} className="text-accent underline underline-offset-2">
           How to play
         </button>
@@ -169,7 +146,6 @@ export default function CardPage() {
       <SquareSheet
         square={openSquare}
         existingPost={openSquare ? postFor.get(openSquare.id) ?? null : null}
-        pending={openSquare ? (pendingFor.get(openSquare.id) as never) ?? null : null}
         locked={locked}
         onClose={() => setOpenSquare(null)}
         onPosted={(kind, postId) => {
@@ -182,7 +158,6 @@ export default function CardPage() {
           );
           router.push(`/play/board?post=${postId}`);
         }}
-        onCancelMatch={cancelMatch}
       />
 
       {celebrate && (
@@ -202,8 +177,14 @@ export default function CardPage() {
           <div className="rounded-lg border border-line-strong bg-surface-2 px-4 py-3">
             <p className="text-sm text-ink-muted">You are playing as</p>
             <p className="mt-0.5 font-display font-semibold">{player?.displayName}</p>
-            <p className="text-sm text-ink-muted">{player?.university} · {player?.club}</p>
+            <p className="text-sm text-ink-muted">{player?.university}</p>
           </div>
+          <Link href="/play/code" className="block">
+            <Button variant="secondary" size="lg">My code</Button>
+          </Link>
+          <Link href="/play/people" className="block">
+            <Button variant="secondary" size="lg">People I met</Button>
+          </Link>
           <Button
             variant="danger"
             size="lg"

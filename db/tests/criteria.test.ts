@@ -8,31 +8,31 @@ import { freshDb, joinPlayer } from './harness';
  * word in the seed, this fails.
  */
 const CRITERIA: Array<[number, string]> = [
-  [1,  'Is from a different university than you'],
-  [2,  'Wants to organize a joint event with another university'],
-  [3,  'Find someone who can speak more than two languages'],
-  [4,  'Find someone who has an idea they have never had the chance to try'],
-  [5,  'Find someone who has a hidden talent'],
-  [6,  'Has been a club leader for more than one year'],
-  [7,  'Find someone who has won or placed in a competition'],
-  [8,  'Has organized a hackathon'],
-  [9,  'Has participated in a programming competition'],
-  [10, 'Has organized an event with 100+ participants'],
-  [11, 'Has organized an event outside their university'],
-  [12, 'Find someone who would rather organize an event than attend one'],
-  [13, 'Can offer technical training to another club'],
-  [14, 'Knows a really good speaker or trainer they could recommend'],
-  [15, 'Find someone who joined their club without knowing what they were getting into'],
-  [16, 'Find someone who joined their club because of a friend'],
-  [17, 'Has an idea for a new club activity'],
-  [18, 'Has attended a GSG program'],
-  [19, 'Find someone who woke up before 7 AM to come here'],
-  [20, 'Is looking for a speaker for an upcoming event'],
-  [21, 'Find someone who has a club tradition they are proud of'],
-  [22, 'Has collaborated with another university club'],
-  [23, 'Is joining from Gaza'],
-  [24, 'Find someone who can recommend a really good Palestinian food spot'],
-  [25, 'Find someone who has spoken in front of 100+ people'],
+  [1,  'Has completed the current phase of their university at DataCamp'],
+  [2,  'Has participated in a DataCamp competition or hackathon'],
+  [3,  'Passed the Data Literacy certificate'],
+  [4,  'Is from a different university than you'],
+  [5,  'Has built AI projects outside DataCamp'],
+  [6,  'Joined DataCamp without knowing what they were getting into'],
+  [7,  'Was in the previous scholarship (2024-2025)'],
+  [8,  'Started before you and can say what they would do differently'],
+  [9,  'Has restarted the same course more than once'],
+  [10, 'Went a full month without opening DataCamp and came back'],
+  [11, 'Has failed an exam on DataCamp'],
+  [12, 'Could not complete a course and skipped it'],
+  [13, 'Almost dropped out and did not'],
+  [14, 'Has used something learned from DataCamp outside the platform'],
+  [15, 'Has the longest streak in the room'],
+  [16, 'Cheated a little on an exercise and felt bad about it'],
+  [17, 'Still does not fully understand something they passed'],
+  [18, 'Finished a track and immediately forgot most of it'],
+  [19, 'Has an error message they will never forget'],
+  [20, 'Does their best work after midnight'],
+  [21, 'Has never asked anyone in the program for help'],
+  [22, 'Explained something wrong to someone confidently'],
+  [23, 'Would take the whole program again differently'],
+  [24, 'Has a resource outside DataCamp worth stealing'],
+  [25, 'Has a study routine worth copying'],
 ];
 
 describe('the criteria set', () => {
@@ -50,12 +50,11 @@ describe('the criteria set', () => {
     expect(r.rows[0].text).toBe(text);
   });
 
-  it('marks only criteria 1 and 22 as machine-checkable', async () => {
+  it('marks only criterion 4 as machine-checkable', async () => {
     const r = await db.query<{ position: number; rule: string }>(
       `select position, rule from criteria where rule <> 'honor' order by position`);
     expect(r.rows).toEqual([
-      { position: 1,  rule: 'diff_university' },
-      { position: 22, rule: 'diff_club_entity' },
+      { position: 4, rule: 'diff_university' },
     ]);
   });
 
@@ -67,7 +66,7 @@ describe('the criteria set', () => {
   });
 
   it('deals every criterion exactly once per card', async () => {
-    const p = await joinPlayer(db, 'Bara', 'IUG', 'GDSC');
+    const p = await joinPlayer(db, 'Bara', { university: 'aqu' });
     const r = await db.query<{ n: number; distinct_criteria: number; distinct_idx: number }>(
       `select count(*)::int n,
               count(distinct criterion_id)::int distinct_criteria,
@@ -79,7 +78,7 @@ describe('the criteria set', () => {
   it('gives different players different layouts', async () => {
     const layouts = new Set<string>();
     for (let i = 0; i < 12; i++) {
-      const p = await joinPlayer(db, `P${i}`, 'IUG', 'GDSC');
+      const p = await joinPlayer(db, `P${i}`, { university: 'aqu' });
       const r = await db.query<{ position: number }>(
         `select c.position from card_squares cs join criteria c on c.id = cs.criterion_id
           where cs.card_id = $1 order by cs.idx`, [p.card_id]);
@@ -90,7 +89,7 @@ describe('the criteria set', () => {
   });
 
   it('keeps a layout stable across reloads', async () => {
-    const p = await joinPlayer(db, 'Stable', 'IUG', 'GDSC');
+    const p = await joinPlayer(db, 'Stable', { university: 'aqu' });
     const read = async () => {
       const r = await db.query<{ idx: number; criterion_id: string }>(
         `select idx, criterion_id from card_squares where card_id = $1 order by idx`, [p.card_id]);

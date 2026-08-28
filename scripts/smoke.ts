@@ -9,10 +9,13 @@
  *   npm run dev        # in one terminal
  *   npm run smoke      # in another
  */
+import { mintScanCredential } from '../src/lib/scanToken';
+
 const APP = process.env.SMOKE_APP_URL ?? 'http://localhost:3000';
 const SUPABASE = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const PASSPHRASE = process.env.ADMIN_PASSPHRASE!;
+const SCAN_SECRET = process.env.SCAN_TOKEN_SECRET!;
 
 let pass = 0;
 let fail = 0;
@@ -49,8 +52,12 @@ async function read<T = any>(pathAndQuery: string): Promise<T[]> {
 
 type Player = { token: string; id: string; cardId: string; name: string };
 
-async function join(name: string, university: string, club: string): Promise<Player> {
-  const { json, status } = await api('/api/join', { displayName: name, university, club });
+async function join(
+  name: string,
+  universityValue: string,
+  universityOtherText: string | null = null,
+): Promise<Player> {
+  const { json, status } = await api('/api/join', { displayName: name, universityValue, universityOtherText });
   if (status !== 200) throw new Error(`join ${name} failed: ${JSON.stringify(json)}`);
   return { token: json.token, id: json.player.id, cardId: json.player.cardId, name };
 }
@@ -61,26 +68,14 @@ const squareAtIdx = async (playerId: string, idx: number) =>
 const squareForPosition = async (playerId: string, position: number) =>
   (await read(`v_card_squares?player_id=eq.${playerId}&criterion_position=eq.${position}&select=*`))[0];
 
-/** Full loop: post -> ask -> confirm. Returns the respond payload. */
-async function fullMatch(requester: Player, confirmer: Player, square: any, reciprocalSquareId?: string) {
-  const post = await api(
-    '/api/posts',
-    { squareId: square.id, kind: 'request', clientKey: `smoke-${square.id}-${Date.now()}` },
-    requester.token,
-  );
-  if (post.status !== 200) throw new Error(`post failed: ${JSON.stringify(post.json)}`);
-
-  const ask = await api(
-    '/api/match/request',
-    { confirmerId: confirmer.id, squareId: square.id, postId: post.json.postId },
-    requester.token,
-  );
-  if (ask.status !== 200) throw new Error(`ask failed: ${JSON.stringify(ask.json)}`);
-
+/** The one real path a fill takes now: mint the scanned player's current
+ *  token, then call /api/scan/fill as the scanning player. */
+async function scanFill(scanning: Player, scanned: Player, square: any) {
+  const { token } = mintScanCredential(scanned.id, SCAN_SECRET);
   return api(
-    `/api/match/${ask.json.confirmationId}/respond`,
-    { action: 'confirm', reciprocalSquareId: reciprocalSquareId ?? null },
-    confirmer.token,
+    '/api/scan/fill',
+    { code: token, squareId: square.id, clientKey: `smoke-${square.id}-${Date.now()}` },
+    scanning.token,
   );
 }
 
@@ -112,10 +107,10 @@ async function main() {
 
   // ----------------------------------------------------------------- join
   section('Joining');
-  const a = await join('Bara', 'Islamic University of Gaza', 'GDSC');
-  const b = await join('Sara', 'Al-Azhar University', 'IEEE');
-  const c = await join('Omar', 'Al-Aqsa University', 'GDSC');
-  const d = await join('Lina', 'University College', 'ACM');
+  const a = await join('Bara', 'aqu');
+  const b = await join('Sara', 'hu');
+  const c = await join('Omar', 'bzu');
+  const d = await join('Lina', 'ppu');
   check('four players joined and got cards', [a, b, c, d].every((p) => p.id && p.cardId));
 
   const cardA = await read(`v_card_squares?player_id=eq.${a.id}&select=idx,criterion_position`);
@@ -139,93 +134,81 @@ async function main() {
   check('admin starts the game', started.status === 200, JSON.stringify(started.json));
   await new Promise((r) => setTimeout(r, 400));
 
-  // ----------------------------------------------------------- the match
-  section('Match confirmation');
+  // ------------------------------------------------------------- scan fill
+  section('Scan fill');
   const selfSquare = await squareForPosition(a.id, 5);
-  const selfMatch = await api('/api/match/request',
-    { confirmerId: a.id, squareId: selfSquare.id, postId: null }, a.token);
-  check('a player cannot mark themselves', selfMatch.status === 409 && selfMatch.json.code === 'GB300',
-    `${selfMatch.status} ${selfMatch.json.code}`);
+  const selfScan = await scanFill(a, a, selfSquare);
+  check('a player cannot scan their own code', selfScan.status === 409 && selfScan.json.code === 'GB300',
+    `${selfScan.status} ${selfScan.json.code}`);
 
-  // criterion 1: different university. A(IUG) vs B(Al-Azhar) is fine.
-  const uniSquare = await squareForPosition(a.id, 1);
-  const uniMatch = await fullMatch(a, b, uniSquare);
-  check('criterion 1 passes for different universities', uniMatch.status === 200,
-    JSON.stringify(uniMatch.json));
+  // criterion 4: different university. A(aqu) vs B(hu) is fine.
+  const uniSquare = await squareForPosition(a.id, 4);
+  const uniFill = await scanFill(a, b, uniSquare);
+  check('criterion 4 passes for different universities', uniFill.status === 200,
+    JSON.stringify(uniFill.json));
 
   const filledSq = await squareAtIdx(a.id, uniSquare.idx);
   check('the square is now filled', filledSq.status === 'filled', filledSq.status);
-  check('and credits the person who confirmed it', filledSq.filled_by_name === 'Sara',
+  check('and credits the person who was scanned', filledSq.filled_by_name === 'Sara',
     String(filledSq.filled_by_name));
 
-  // criterion 1 must fail between two people at the same university
-  const e = await join('Yousef', 'Islamic University of Gaza', 'IEEE');
-  const eUniSquare = await squareForPosition(e.id, 1);
-  let sameUni: any;
-  try {
-    sameUni = await fullMatch(e, a, eUniSquare);
-  } catch (err) {
-    sameUni = { status: 409, json: { code: 'GB302', thrown: String(err) } };
-  }
-  check('criterion 1 is refused for the same university',
-    String(sameUni.json?.code ?? '').includes('GB302') || String(sameUni.json?.thrown ?? '').includes('GB302'),
-    JSON.stringify(sameUni.json));
+  // criterion 4 must fail between two people at the same university
+  const e = await join('Yousef', 'aqu');
+  const eUniSquare = await squareForPosition(e.id, 4);
+  const sameUni = await scanFill(e, a, eUniSquare);
+  check('criterion 4 is refused for the same university',
+    sameUni.json?.code === 'GB302', JSON.stringify(sameUni.json));
 
-  // criterion 22: different club entity. E(IUG/IEEE) vs A(IUG/GDSC) is allowed.
-  const clubSquare = await squareForPosition(e.id, 22);
-  const clubMatch = await fullMatch(e, a, clubSquare);
-  check('criterion 22 allows different clubs at the same university',
-    clubMatch.status === 200, JSON.stringify(clubMatch.json));
+  // criterion 7 ("was in the previous scholarship") is honor system now —
+  // every attendee is the same cohort, so it fills like any other square.
+  // Scanned with c, not b, so it doesn't eat into the a<->b pair cap the
+  // next section relies on.
+  const cohortSquareOnA = await squareForPosition(a.id, 7);
+  const cohortFill = await scanFill(a, c, cohortSquareOnA);
+  check('criterion 7 is honor system, not server-checked',
+    cohortFill.status === 200, JSON.stringify(cohortFill.json));
 
   // ------------------------------------------------------------ pair cap
   section('Pair cap');
   const third = await squareForPosition(a.id, 9);
-  let capped: any;
-  try { capped = await fullMatch(a, b, third); }
-  catch (err) { capped = { json: { thrown: String(err) } }; }
-  // a<->b used 1 (criterion 1) plus e<->a used a different pair, so a<->b has room for one more
-  check('a second match with the same person is allowed',
+  const capped = await scanFill(a, b, third);
+  check('a second fill with the same person is allowed',
     capped.status === 200, JSON.stringify(capped.json));
 
   const fourth = await squareForPosition(a.id, 12);
-  let over: any;
-  try { over = await fullMatch(a, b, fourth); }
-  catch (err) { over = { json: { thrown: String(err) } }; }
-  check('a third match with the same person is refused',
-    JSON.stringify(over.json).includes('GB301'), JSON.stringify(over.json).slice(0, 160));
+  const over = await scanFill(a, b, fourth);
+  check('a third fill with the same person is refused',
+    over.json?.code === 'GB301', JSON.stringify(over.json).slice(0, 160));
 
-  // ----------------------------------------------------------- reciprocal
-  section('Reciprocal fill');
-  const recipTarget = await squareForPosition(c.id, 5);
-  const recipMine = await squareForPosition(d.id, 7);
-  const recip = await fullMatch(c, d, recipTarget, recipMine.id);
-  check('confirming can fill the confirmer own chosen square too',
-    recip.status === 200 && recip.json.match?.reciprocal_filled === true,
-    JSON.stringify(recip.json).slice(0, 200));
-
-  const dSquare = await squareAtIdx(d.id, recipMine.idx);
-  check('the reciprocal square really filled', dSquare.status === 'filled', dSquare.status);
+  // ----------------------------------------------------------- idempotency
+  section('Idempotency');
+  const idemSquare = await squareForPosition(c.id, 5);
+  const key = `idem-${Date.now()}`;
+  const { token: cToken } = mintScanCredential(d.id, SCAN_SECRET);
+  const first = await api('/api/scan/fill', { code: cToken, squareId: idemSquare.id, clientKey: key }, c.token);
+  const again = await api('/api/scan/fill', { code: cToken, squareId: idemSquare.id, clientKey: key }, c.token);
+  check('a retried fill with the same client key replays the same result',
+    again.status === 200 && JSON.stringify(again.json) === JSON.stringify(first.json),
+    JSON.stringify({ first: first.json, again: again.json }));
 
   // ---------------------------------------------------------------- bingo
-  section('BINGO and leaderboard');
-  // Fill row 0 for player D. The pair cap means this needs several people.
+  section('BINGO, top helpers, and leaderboard');
   const helpers = [
-    await join('Helper1', 'Bethlehem University', 'Robotics'),
-    await join('Helper2', 'An-Najah University', 'GDSC'),
-    await join('Helper3', 'Birzeit University', 'IEEE'),
+    await join('Helper1', 'bzu'),
+    await join('Helper2', 'nnu'),
+    await join('Helper3', 'hu'),
   ];
   let helperIdx = 0;
   for (let idx = 0; idx < 5; idx++) {
     const sq = await squareAtIdx(d.id, idx);
     if (sq.status === 'filled') continue;
-    const helper = helpers[Math.floor(helperIdx / 2) % helpers.length];
-    helperIdx++;
-    const r = await fullMatch(d, helper, sq);
-    if (r.status !== 200) {
-      // pair cap hit — take the next helper and retry once
-      const alt = helpers[(Math.floor(helperIdx / 2) + 1) % helpers.length];
-      await fullMatch(d, alt, sq);
+    let filled = false;
+    for (let attempt = 0; attempt < helpers.length && !filled; attempt++) {
+      const helper = helpers[(Math.floor(helperIdx / 2) + attempt) % helpers.length];
+      const r = await scanFill(d, helper, sq);
+      if (r.status === 200) filled = true;
     }
+    helperIdx++;
   }
 
   const row0 = await read(`v_card_squares?player_id=eq.${d.id}&idx=lt.5&select=idx,status`);
@@ -242,14 +225,46 @@ async function main() {
     JSON.stringify(board));
   check('a player appears only once', new Set(board.map((r: any) => r.display_name)).size === board.length);
 
+  // Push one helper's count past the pair cap of 2 with two more distinct
+  // pairs, so "not capped by the pair cap" is actually exercised rather
+  // than asserted on whatever the row-0 fill happened to produce.
+  const strangers = [await join('Stranger1', 'nnu'), await join('Stranger2', 'ppu')];
+  for (const s of strangers) {
+    const sq = await squareForPosition(s.id, 9); // honor
+    await scanFill(s, helpers[0], sq);
+  }
+
+  const topHelpers = await read(`v_top_helpers?select=display_name,helped_count&order=helped_count.desc`);
+  check('top helpers are not capped by the pair cap',
+    topHelpers.some((h: any) => h.helped_count > 2), JSON.stringify(topHelpers));
+
+  // -------------------------------------------------------------- undo
+  section('Admin undo');
+  const toUndo = await squareAtIdx(a.id, uniSquare.idx);
+  const undo = await api('/api/admin/moderate', { action: 'undo_square', id: toUndo.id });
+  check('admin can undo a filled square', undo.status === 200, JSON.stringify(undo.json));
+  const afterUndo = await squareAtIdx(a.id, uniSquare.idx);
+  check('the square is empty again', afterUndo.status === 'empty', afterUndo.status);
+
   // ------------------------------------------------------------- security
   section('Security');
-  const noToken = await api('/api/posts', { squareId: sq0.id, kind: 'request', clientKey: 'x' });
+  const noToken = await api('/api/posts', { squareId: sq0.id, kind: 'request', clientKey: 'no-token-x' });
   check('a write without a token is rejected', noToken.status === 401);
 
   const forged = await api('/api/posts',
-    { squareId: sq0.id, kind: 'request', clientKey: 'y' }, `${a.token}tampered`);
+    { squareId: sq0.id, kind: 'request', clientKey: 'tampered-y' }, `${a.token}tampered`);
   check('a tampered token is rejected', forged.status === 401);
+
+  const forgedScan = await api('/api/scan/fill',
+    { code: mintScanCredential(b.id, SCAN_SECRET).token, squareId: sq0.id, clientKey: 'tampered-z' },
+    `${a.token}tampered`);
+  check('a tampered token is rejected on the scan-fill route too', forgedScan.status === 401);
+
+  const wrongSecretToken = mintScanCredential(b.id, `${SCAN_SECRET}-wrong`).token;
+  const badScanToken = await api('/api/scan/fill',
+    { code: wrongSecretToken, squareId: sq0.id, clientKey: 'wrong-sec' }, a.token);
+  check('a scan token signed with the wrong secret is rejected',
+    badScanToken.status === 400 && badScanToken.json.code === 'GB401', JSON.stringify(badScanToken.json));
 
   const anonWrite = await fetch(`${SUPABASE}/rest/v1/bingos`, {
     method: 'POST',
@@ -258,10 +273,12 @@ async function main() {
   });
   check('the anon key cannot award a BINGO directly', anonWrite.status >= 400, String(anonWrite.status));
 
-  const anonRpc = await fetch(`${SUPABASE}/rest/v1/rpc/rpc_respond_match`, {
+  const anonRpc = await fetch(`${SUPABASE}/rest/v1/rpc/rpc_scan_fill`, {
     method: 'POST',
     headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ p_confirmation_id: '00000000-0000-0000-0000-000000000000', p_confirmer_id: a.id, p_action: 'confirm' }),
+    body: JSON.stringify({
+      p_scanning_player_id: a.id, p_square_id: sq0.id, p_scanned_player_id: b.id, p_client_key: 'anon-rpc',
+    }),
   });
   check('the anon key cannot call the rules engine', anonRpc.status >= 400, String(anonRpc.status));
 

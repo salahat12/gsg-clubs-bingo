@@ -2,7 +2,7 @@ import { browserClient } from './supabase';
 import { EVENT_SLUG } from './config';
 import type {
   BoardFilter, BoardPost, BoardReply, BoardSort, CardSquare, Criterion, EventState,
-  EventStats, LeaderboardRow, LobbyCluster, LobbyPlayer, PendingConfirmation,
+  EventStats, FillFeedRow, LeaderboardRow, LobbyCluster, LobbyPlayer, TopHelperRow,
 } from './types';
 
 /**
@@ -80,18 +80,6 @@ export async function fetchUniversitySuggestions(eventId: string): Promise<strin
   return data.map((d) => d.university);
 }
 
-export async function fetchClubSuggestions(eventId: string): Promise<string[]> {
-  const data = await rows<{ club: string }>(
-    await db()
-      .from('v_clubs')
-      .select('club, player_count')
-      .eq('event_id', eventId)
-      .order('player_count', { ascending: false })
-      .limit(40),
-  );
-  return data.map((d) => d.club);
-}
-
 // ---------------------------------------------------------------- board
 export const BOARD_PAGE = 25;
 
@@ -151,25 +139,26 @@ export async function fetchCard(playerId: string): Promise<CardSquare[]> {
   );
 }
 
-/** Prompts waiting for me to confirm. */
-export async function fetchInbox(playerId: string): Promise<PendingConfirmation[]> {
-  return rows<PendingConfirmation>(
+/** Every fill on my own card, newest first — "People I met". */
+export async function fetchMyFills(playerId: string): Promise<FillFeedRow[]> {
+  return rows<FillFeedRow>(
     await db()
-      .from('v_pending_confirmations')
+      .from('v_fill_feed')
       .select('*')
-      .eq('confirmer_id', playerId)
-      .order('created_at', { ascending: true }),
+      .eq('owner_id', playerId)
+      .order('filled_at', { ascending: false }),
   );
 }
 
-/** Asks I have made that are still waiting on someone else. */
-export async function fetchOutbox(playerId: string): Promise<PendingConfirmation[]> {
-  return rows<PendingConfirmation>(
+/** Every fill event-wide, newest first — the admin live feed. */
+export async function fetchFillFeed(eventId: string, limit = 100): Promise<FillFeedRow[]> {
+  return rows<FillFeedRow>(
     await db()
-      .from('v_pending_confirmations')
+      .from('v_fill_feed')
       .select('*')
-      .eq('requester_id', playerId)
-      .order('created_at', { ascending: true }),
+      .eq('event_id', eventId)
+      .order('filled_at', { ascending: false })
+      .limit(limit),
   );
 }
 
@@ -188,6 +177,18 @@ export async function fetchLeaderboard(eventId: string, limit = 100): Promise<Le
 export async function fetchMyBingos(playerId: string): Promise<{ line_key: string; bingo_at: string }[]> {
   return rows<{ line_key: string; bingo_at: string }>(
     await db().from('bingos').select('line_key, bingo_at').eq('player_id', playerId),
+  );
+}
+
+/** The second prize: most-scanned players, not capped by the pair cap. */
+export async function fetchTopHelpers(eventId: string, limit = 3): Promise<TopHelperRow[]> {
+  return rows<TopHelperRow>(
+    await db()
+      .from('v_top_helpers')
+      .select('*')
+      .eq('event_id', eventId)
+      .order('helped_count', { ascending: false })
+      .limit(limit),
   );
 }
 

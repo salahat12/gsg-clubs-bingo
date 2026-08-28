@@ -24,8 +24,7 @@ import { POLL_MS } from './config';
 export type Transport = 'connecting' | 'realtime' | 'polling' | 'offline';
 
 export const WATCHED_TABLES = [
-  'events', 'players', 'posts', 'replies',
-  'card_squares', 'match_confirmations', 'bingos',
+  'events', 'players', 'posts', 'replies', 'card_squares', 'bingos',
 ] as const;
 export type WatchedTable = (typeof WATCHED_TABLES)[number];
 
@@ -47,7 +46,11 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
   // effect after mount — there is nothing to synchronize, the answer is
   // just not known until the client runs.
   const [transport, setTransport] = useState<Transport>(() => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) return 'offline';
+    // `window` (not `navigator`) is the browser-only guard here: some dev
+    // SSR runtimes polyfill a bare `navigator` global with `.onLine`
+    // falsy, which would make the server always render 'offline' and
+    // mismatch the real client on hydration.
+    if (typeof window !== 'undefined' && !navigator.onLine) return 'offline';
     if (!isConfigured()) return 'polling';
     return 'connecting';
   });
