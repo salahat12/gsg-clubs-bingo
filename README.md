@@ -1,6 +1,6 @@
 # DataCamp Scholarship Networking Bingo
 
-**Live:** [gsg-clubs-bingo.vercel.app](https://gsg-clubs-bingo.vercel.app) · admin at `/admin`
+**Live:** [gsg-clubs-bingo.vercel.app](https://gsg-clubs-bingo.vercel.app) · admin at `/admin` · **Source:** [baraalsedih/gsg-clubs-bingo](https://github.com/baraalsedih/gsg-clubs-bingo)
 
 A mobile-first networking game for a DataCamp scholarship event. Attendees
 join on their phones, wait in a lobby, and start together when the organiser
@@ -76,7 +76,7 @@ is the whole point of the lobby.
 ### Running the checks
 
 ```bash
-npm test              # 227 tests: real Postgres via PGlite, plus scan-token
+npm test              # 225 tests: real Postgres via PGlite, plus scan-token
                        # and route-level unit tests (no Docker needed)
 npm run lint           # clean
 npx tsc --noEmit       # clean
@@ -142,8 +142,19 @@ accounts and about 20 minutes.
 
 ### 2.2 Vercel
 
+Already wired up:
+**[baraalsedih/gsg-clubs-bingo](https://github.com/baraalsedih/gsg-clubs-bingo) →
+[gsg-clubs-bingo.vercel.app](https://gsg-clubs-bingo.vercel.app)**, production branch
+`main`. Every push to `main` builds and deploys on its own; no CLI step. To deploy by
+hand anyway — from a dirty working tree, say — `npx vercel deploy --prod` still works.
+
+Setting this up from scratch on a new account:
+
 1. Push this repo to GitHub, then **Import Project** on
-   [vercel.com](https://vercel.com).
+   [vercel.com](https://vercel.com). The GitHub account that owns the repo must be the
+   same one connected to Vercel. Linking a repo owned by a *different* account fails
+   with a permissions error that is easy to miss, and quietly leaves you on
+   CLI-only deploys.
 2. Framework preset: Next.js (auto-detected).
 3. Add every variable from `.env.local` to **Settings → Environment
    Variables** — same names, the hosted Supabase values instead of local
