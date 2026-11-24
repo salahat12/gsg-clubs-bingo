@@ -2,7 +2,7 @@
 -- seed.sql — the fixed criteria set for the event, and the university
 -- lookup the join form's dropdown reads.
 --
--- Text is verbatim from the brief and must not be reworded. Positions
+-- Text is verbatim from the event brief (Arabic) and must not be reworded. Positions
 -- are the printed card's reading order; each player's card is a shuffled
 -- permutation of these 25, stored per card at deal time.
 --
@@ -40,31 +40,31 @@ insert into criteria (event_id, position, text, rule)
 select e.id, v.position, v.text, v.rule
 from events e
 cross join (values
-  (1,  'Has completed the current phase of their university at DataCamp',                'honor'),
-  (2,  'Has participated in a DataCamp competition or hackathon',                        'honor'),
-  (3,  'Passed the Data Literacy certificate',                                           'honor'),
-  (4,  'Is from a different university than you',                                        'diff_university'),
-  (5,  'Has built AI projects outside DataCamp',                                          'honor'),
-  (6,  'Joined DataCamp without knowing what they were getting into',                     'honor'),
-  (7,  'Was in the previous scholarship (2024-2025)',                                     'honor'),
-  (8,  'Started before you and can say what they would do differently',                   'honor'),
-  (9,  'Has restarted the same course more than once',                                    'honor'),
-  (10, 'Went a full month without opening DataCamp and came back',                        'honor'),
-  (11, 'Has failed an exam on DataCamp',                                                  'honor'),
-  (12, 'Could not complete a course and skipped it',                                      'honor'),
-  (13, 'Almost dropped out and did not',                                                  'honor'),
-  (14, 'Has used something learned from DataCamp outside the platform',                   'honor'),
-  (15, 'Has the longest streak in the room',                                              'honor'),
-  (16, 'Cheated a little on an exercise and felt bad about it',                           'honor'),
-  (17, 'Still does not fully understand something they passed',                           'honor'),
-  (18, 'Finished a track and immediately forgot most of it',                              'honor'),
-  (19, 'Has an error message they will never forget',                                     'honor'),
-  (20, 'Does their best work after midnight',                                             'honor'),
-  (21, 'Has never asked anyone in the program for help',                                  'honor'),
-  (22, 'Explained something wrong to someone confidently',                                'honor'),
-  (23, 'Would take the whole program again differently',                                  'honor'),
-  (24, 'Has a resource outside DataCamp worth stealing',                                  'honor'),
-  (25, 'Has a study routine worth copying',                                               'honor')
+  (1, 'طالب من جامعة القدس المفتوحة: اسأله عن تخصصه أو مشروع شغال عليه', 'honor'),
+  (2, 'طالب من جامعة بيرزيت: اسأله شو أصعب مادة أخدها لهلق؟', 'honor'),
+  (3, 'طالب من الجامعة العربية الأمريكية (رام الله): اسأله عن أحلى مكان قعدة بالجامعة', 'honor'),
+  (4, 'من جامعة غير جامعتك', 'diff_university'),
+  (5, 'جاي من برا رام الله اليوم: سافر من مدينة ثانية عشان يحضر الإيفنت', 'honor'),
+  (6, 'وحش الـ XP: جمع أكثر من 10,000 XP على DataCamp', 'honor'),
+  (7, 'خلّص كورس أو شهادة على DataCamp هذا الأسبوع', 'honor'),
+  (8, 'فريق البايثون: بفضّل Python على باقي لغات البرمجة', 'honor'),
+  (9, 'محلل بيانات: بحب SQL أو Power BI أو Excel أكثر من البرمجة', 'honor'),
+  (10, 'صاحب مشروع AI: بنى مشروع أو جرّب أداة ذكاء اصطناعي جديدة مؤخراً', 'honor'),
+  (11, 'ضحية الفاصلة المنقوطة: سهر للصبح يدور على Bug وطلع الغلط غبي جداً', 'honor'),
+  (12, 'صديق ChatGPT: اعتمد عليه بآخر واجب أو مشروع', 'honor'),
+  (13, 'مدمن القهوة: شرب فنجانين قهوة أو أكثر قبل ما يوصل الإيفنت', 'honor'),
+  (14, 'شغّال ومش فاهم ليش: كتب كود اشتغل وخايف يلمسه', 'honor'),
+  (15, 'نسيت أعمل Save: طار شغله لأنه نسي يحفظ الملف', 'honor'),
+  (16, 'بشتغل تحت الضغط: سلّم مشروع أو كويز قبل الديدلاين بدقيقة', 'honor'),
+  (17, 'حط شهادة DataCamp على الـ CV', 'honor'),
+  (18, 'بشتغل بالـ Dark Mode دايماً', 'honor'),
+  (19, 'نسخ كود من Stack Overflow وما فهمه', 'honor'),
+  (20, 'عنده مشروع على GitHub ما انكمّل', 'honor'),
+  (21, 'كتب Query واشتغل من أول مرة', 'honor'),
+  (22, 'بحب شغل الـ Terminal', 'honor'),
+  (23, 'ضيّع ساعة على مشكلة Indentation', 'honor'),
+  (24, 'فاتح أكثر من 20 تبويب هلق', 'honor'),
+  (25, 'تخصصه مش حاسوب وبتعلّم برمجة', 'honor')
 ) as v(position, text, rule)
 where e.slug = 'gsg-clubs'
 on conflict (event_id, position)
